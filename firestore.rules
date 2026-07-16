@@ -1,0 +1,25 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{userId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null && request.auth.uid == userId;
+      // Owners can edit their own profile, but never the scoring fields —
+      // those are written only by Cloud Functions via the Admin SDK, which
+      // bypasses these rules entirely. This stops a client from just
+      // setting its own scoreBand.
+      allow update: if request.auth != null
+        && request.auth.uid == userId
+        && !request.resource.data.diff(resource.data).affectedKeys()
+              .hasAny(['scoringStatus', 'scoreBand', 'scoreRejectionReason', 'scoredAt']);
+      allow delete: if false;
+    }
+
+    // Raw score, confidence, and scoring version — never client-readable.
+    // Only Cloud Functions (Admin SDK) touch this collection.
+    match /scores/{userId} {
+      allow read, write: if false;
+    }
+  }
+}

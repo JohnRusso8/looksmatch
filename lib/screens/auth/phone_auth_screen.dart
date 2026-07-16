@@ -25,30 +25,79 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
   }
 
   String? _validatePhone(String? value) {
-    final digits = (value ?? '').replaceAll(RegExp(r'\D'), '');
-    if (digits.length < 10) return 'Enter a valid phone number';
+    final digits = _nationalPhoneDigits(value ?? '');
+    if (digits.length != 10) return 'Enter a valid 10-digit phone number';
     return null;
+  }
+
+  String _nationalPhoneDigits(String value) {
+    var digits = value.replaceAll(RegExp(r'\D'), '');
+    if (digits.length == 11 && digits.startsWith('1')) {
+      digits = digits.substring(1);
+    }
+    return digits;
+  }
+
+  String get _phoneNumber => '+1${_nationalPhoneDigits(_phoneController.text)}';
+
+  void _finishAuthentication() {
+    if (!mounted) return;
+    Navigator.of(context).popUntil((route) => route.isFirst);
   }
 
   Future<void> _sendCode() async {
     if (!_formKey.currentState!.validate()) return;
 
+    FocusScope.of(context).unfocus();
     setState(() => _submitting = true);
-    // Placeholder network delay; swap for FirebaseAuth.verifyPhoneNumber.
-    await Future.delayed(const Duration(milliseconds: 700));
-    if (!mounted) return;
 
-    setState(() => _submitting = false);
+    try {
+      final session = await widget.auth.sendPhoneVerificationCode(
+        phoneNumber: _phoneNumber,
+        onAutomaticVerification: _finishAuthentication,
+      );
 
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => OtpVerificationScreen(
-          auth: widget.auth,
-          phoneNumber: '+1 ${_phoneController.text.trim()}',
+      if (!mounted) return;
+      if (session.automaticallyVerified) {
+        _finishAuthentication();
+        return;
+      }
+
+      setState(() => _submitting = false);
+
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => OtpVerificationScreen(
+            auth: widget.auth,
+            phoneNumber: _phoneNumber,
+            verificationId: session.verificationId,
+            resendToken: session.resendToken,
+          ),
         ),
-      ),
-    );
+      );
+    } catch (error) {
+      if (!mounted) return;
+      _showMessage(authErrorMessage(error));
+    } finally {
+      if (mounted && _submitting) {
+        setState(() => _submitting = false);
+      }
+    }
+  }
+
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text(
+            message,
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+        ),
+      );
   }
 
   @override
@@ -95,7 +144,8 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'We\'ll text you a code to verify it\'s you.',
+                  'We\'ll text you a code to verify it\'s you. Standard message '
+                  'and data rates may apply.',
                   style: TextStyle(
                     color: colors.headerSecondaryText,
                     fontSize: 13,
@@ -127,12 +177,16 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
                         ),
                       ),
                     ),
-                    prefixIconConstraints:
-                        const BoxConstraints(minWidth: 0, minHeight: 0),
+                    prefixIconConstraints: const BoxConstraints(
+                      minWidth: 0,
+                      minHeight: 0,
+                    ),
                     filled: true,
                     fillColor: colors.inputBackground,
-                    contentPadding:
-                        const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 14,
+                    ),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(15),
                       borderSide: BorderSide(color: colors.inputBorder),
@@ -150,8 +204,8 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: colors.primaryButtonBackground,
                     foregroundColor: colors.primaryButtonText,
-                    disabledBackgroundColor:
-                        colors.primaryButtonBackground.withOpacity(0.5),
+                    disabledBackgroundColor: colors.primaryButtonBackground
+                        .withOpacity(0.5),
                     minimumSize: const Size.fromHeight(52),
                     elevation: 0,
                     shape: RoundedRectangleBorder(

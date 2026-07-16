@@ -9,7 +9,7 @@ import 'profile_screen.dart';
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key, required this.onSignOut});
 
-  final VoidCallback onSignOut;
+  final Future<void> Function() onSignOut;
 
   @override
   State<HomeShell> createState() => _HomeShellState();
@@ -51,7 +51,12 @@ class _HomeShellState extends State<HomeShell> {
               children: [
                 _navItem(colors, 0, Icons.auto_awesome_rounded, 'Discover'),
                 _navItem(colors, 1, Icons.favorite_border_rounded, 'Likes'),
-                _navItem(colors, 2, Icons.chat_bubble_outline_rounded, 'Matches'),
+                _navItem(
+                  colors,
+                  2,
+                  Icons.chat_bubble_outline_rounded,
+                  'Matches',
+                ),
                 _navItem(colors, 3, Icons.person_outline_rounded, 'Profile'),
               ],
             ),
@@ -68,8 +73,9 @@ class _HomeShellState extends State<HomeShell> {
     String label,
   ) {
     final selected = _index == index;
-    final color =
-        selected ? colors.bottomNavSelectedIcon : colors.bottomNavUnselectedIcon;
+    final color = selected
+        ? colors.bottomNavSelectedIcon
+        : colors.bottomNavUnselectedIcon;
 
     return InkWell(
       onTap: () => setState(() => _index = index),

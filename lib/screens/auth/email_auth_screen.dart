@@ -14,7 +14,6 @@ class EmailAuthScreen extends StatefulWidget {
 
 class _EmailAuthScreenState extends State<EmailAuthScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _nameController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
 
@@ -24,16 +23,9 @@ class _EmailAuthScreenState extends State<EmailAuthScreen> {
 
   @override
   void dispose() {
-    _nameController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
-  }
-
-  String? _validateName(String? value) {
-    if (!_isCreatingAccount) return null;
-    if ((value ?? '').trim().isEmpty) return 'Enter your name';
-    return null;
   }
 
   String? _validateEmail(String? value) {
@@ -54,12 +46,46 @@ class _EmailAuthScreenState extends State<EmailAuthScreen> {
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
 
+    FocusScope.of(context).unfocus();
     setState(() => _submitting = true);
-    // Placeholder network delay; swap for FirebaseAuth create/sign-in calls.
-    await Future.delayed(const Duration(milliseconds: 700));
-    if (!mounted) return;
 
-    widget.auth.signIn();
+    try {
+      if (_isCreatingAccount) {
+        await widget.auth.createAccountWithEmail(
+          email: _emailController.text,
+          password: _passwordController.text,
+        );
+      } else {
+        await widget.auth.signInWithEmail(
+          email: _emailController.text,
+          password: _passwordController.text,
+        );
+      }
+
+      if (!mounted) return;
+      Navigator.of(context).popUntil((route) => route.isFirst);
+    } catch (error) {
+      if (!mounted) return;
+      _showMessage(authErrorMessage(error));
+    } finally {
+      if (mounted) {
+        setState(() => _submitting = false);
+      }
+    }
+  }
+
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text(
+            message,
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+        ),
+      );
   }
 
   @override
@@ -134,23 +160,6 @@ class _EmailAuthScreenState extends State<EmailAuthScreen> {
                   ),
                 ),
                 const SizedBox(height: 20),
-                if (_isCreatingAccount) ...[
-                  TextFormField(
-                    controller: _nameController,
-                    textCapitalization: TextCapitalization.words,
-                    style: TextStyle(
-                      color: colors.headerPrimaryText,
-                      fontWeight: FontWeight.w700,
-                    ),
-                    decoration: _fieldDecoration(
-                      colors,
-                      hint: 'Full name',
-                      icon: Icons.person_outline_rounded,
-                    ),
-                    validator: _validateName,
-                  ),
-                  const SizedBox(height: 14),
-                ],
                 TextFormField(
                   controller: _emailController,
                   keyboardType: TextInputType.emailAddress,
@@ -196,8 +205,8 @@ class _EmailAuthScreenState extends State<EmailAuthScreen> {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: colors.primaryButtonBackground,
                     foregroundColor: colors.primaryButtonText,
-                    disabledBackgroundColor:
-                        colors.primaryButtonBackground.withOpacity(0.5),
+                    disabledBackgroundColor: colors.primaryButtonBackground
+                        .withOpacity(0.5),
                     minimumSize: const Size.fromHeight(52),
                     elevation: 0,
                     shape: RoundedRectangleBorder(
@@ -269,7 +278,10 @@ class _EmailAuthScreenState extends State<EmailAuthScreen> {
   }) {
     return InputDecoration(
       hintText: hint,
-      hintStyle: TextStyle(color: colors.inputHint, fontWeight: FontWeight.w600),
+      hintStyle: TextStyle(
+        color: colors.inputHint,
+        fontWeight: FontWeight.w600,
+      ),
       prefixIcon: Icon(icon, color: colors.accent),
       suffixIcon: suffix,
       filled: true,

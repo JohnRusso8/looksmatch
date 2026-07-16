@@ -1,10 +1,16 @@
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 
+import 'firebase_options.dart';
 import 'screens/auth_gate.dart';
 import 'services/auth_controller.dart';
 import 'theme/app_theme.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
   runApp(const LooksMatchApp());
 }
 
@@ -16,7 +22,7 @@ class LooksMatchApp extends StatefulWidget {
 }
 
 class _LooksMatchAppState extends State<LooksMatchApp> {
-  final AuthController _auth = AuthController();
+  final AuthController _auth = FirebaseAuthController();
 
   @override
   void dispose() {

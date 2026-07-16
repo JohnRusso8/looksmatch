@@ -2,11 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
 import '../widgets/network_avatar.dart';
+import '../widgets/sign_out_dialog.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key, required this.onSignOut});
 
-  final VoidCallback onSignOut;
+  final Future<void> Function() onSignOut;
 
   static const String _myPhoto = 'https://i.pravatar.cc/600?img=68';
   static const List<String> _myPhotos = [
@@ -37,6 +38,13 @@ class ProfileScreen extends StatelessWidget {
         ),
         actions: [
           IconButton(
+            tooltip: 'Log out',
+            onPressed: () =>
+                confirmSignOut(context: context, onSignOut: onSignOut),
+            icon: Icon(Icons.logout_rounded, color: colors.headerIconColor),
+          ),
+          IconButton(
+            tooltip: 'Settings',
             onPressed: () {},
             icon: Icon(Icons.settings_outlined, color: colors.headerIconColor),
           ),
@@ -58,7 +66,10 @@ class ProfileScreen extends StatelessWidget {
                     decoration: BoxDecoration(
                       color: colors.primaryButtonBackground,
                       shape: BoxShape.circle,
-                      border: Border.all(color: colors.pageBackground, width: 3),
+                      border: Border.all(
+                        color: colors.pageBackground,
+                        width: 3,
+                      ),
                     ),
                     child: Icon(
                       Icons.edit_rounded,
@@ -204,70 +215,11 @@ class ProfileScreen extends StatelessWidget {
             icon: Icons.logout_rounded,
             label: 'Log Out',
             destructive: true,
-            onTap: () => _confirmSignOut(context, colors),
+            onTap: () => confirmSignOut(context: context, onSignOut: onSignOut),
           ),
         ],
       ),
     );
-  }
-
-  Future<void> _confirmSignOut(
-    BuildContext context,
-    LooksMatchColors colors,
-  ) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          backgroundColor: colors.dialogBackground,
-          surfaceTintColor: Colors.transparent,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
-          ),
-          title: Text(
-            'Log out?',
-            style: TextStyle(
-              color: colors.headerPrimaryText,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          content: Text(
-            'You\'ll need to sign back in to see your matches and messages.',
-            style: TextStyle(
-              color: colors.headerSecondaryText,
-              height: 1.35,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: Text(
-                'Cancel',
-                style: TextStyle(
-                  color: colors.headerSecondaryText,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, true),
-              child: Text(
-                'Log Out',
-                style: TextStyle(
-                  color: colors.deleteBackground,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (confirmed == true) {
-      onSignOut();
-    }
   }
 
   Widget _menuTile({
@@ -295,7 +247,9 @@ class ProfileScreen extends StatelessWidget {
         title: Text(
           label,
           style: TextStyle(
-            color: destructive ? colors.deleteBackground : colors.headerPrimaryText,
+            color: destructive
+                ? colors.deleteBackground
+                : colors.headerPrimaryText,
             fontWeight: FontWeight.w800,
             fontSize: 14,
           ),
