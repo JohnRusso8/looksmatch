@@ -1,21 +1,83 @@
 import 'package:flutter/material.dart';
 
-import '../models/match_profile.dart';
+import '../models/likes_and_matches.dart';
+import '../services/auth_controller.dart';
 import '../theme/app_theme.dart';
 import '../widgets/network_avatar.dart';
 import 'chat_screen.dart';
 
-class MatchesScreen extends StatelessWidget {
-  const MatchesScreen({super.key});
+String _relativeTime(DateTime? value) {
+  if (value == null) return '';
+
+  final difference = DateTime.now().difference(value);
+  if (difference.inMinutes < 1) return 'Now';
+  if (difference.inHours < 1) return '${difference.inMinutes}m ago';
+  if (difference.inDays < 1) return '${difference.inHours}h ago';
+  if (difference.inDays < 7) return '${difference.inDays}d ago';
+  return '${value.month}/${value.day}/${value.year}';
+}
+
+class MatchesScreen extends StatefulWidget {
+  const MatchesScreen({super.key, required this.auth, this.refreshToken = 0});
+
+  final AuthController auth;
+
+  /// Bump this (e.g. from the host shell) to force a reload — used right
+  /// after a fresh match so this tab shows it without needing a relaunch.
+  final int refreshToken;
+
+  @override
+  State<MatchesScreen> createState() => _MatchesScreenState();
+}
+
+class _MatchesScreenState extends State<MatchesScreen> {
+  bool _loading = true;
+  List<MatchConnection> _matches = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant MatchesScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.refreshToken != oldWidget.refreshToken) {
+      _load();
+    }
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+
+    try {
+      final matches = await widget.auth.getMatches();
+      if (!mounted) return;
+      setState(() {
+        _matches = matches;
+        _loading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            behavior: SnackBarBehavior.floating,
+            content: Text(
+              'Could not load matches. Pull down to retry.',
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+        );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final conversations = sampleConversations;
-    final newMatches =
-        conversations.where((c) => c.isNewMatch).toList(growable: false);
-    final others =
-        conversations.where((c) => !c.isNewMatch).toList(growable: false);
 
     return Scaffold(
       backgroundColor: colors.pageBackground,
@@ -34,99 +96,134 @@ class MatchesScreen extends StatelessWidget {
           ),
         ),
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(0, 12, 0, 24),
+      body: _loading
+          ? Center(child: CircularProgressIndicator(color: colors.accent))
+          : RefreshIndicator(
+              color: colors.accent,
+              onRefresh: _load,
+              child: _buildBody(colors),
+            ),
+    );
+  }
+
+  Widget _buildBody(LooksMatchColors colors) {
+    final newMatches = _matches.where((m) => m.isNewMatch).toList();
+    final others = _matches.where((m) => !m.isNewMatch).toList();
+
+    if (_matches.isEmpty) {
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
         children: [
-          if (newMatches.isNotEmpty) ...[
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
+          SizedBox(
+            height: MediaQuery.of(context).size.height * 0.6,
+            child: Center(
               child: Text(
-                'New matches',
+                'No matches yet. Keep exploring Discover!',
+                textAlign: TextAlign.center,
                 style: TextStyle(
                   color: colors.headerSecondaryText,
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.3,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
             ),
-            const SizedBox(height: 10),
-            SizedBox(
-              height: 96,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                itemCount: newMatches.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 14),
-                itemBuilder: (context, index) {
-                  final conversation = newMatches[index];
-                  return GestureDetector(
-                    onTap: () => Navigator.push(
+          ),
+        ],
+      );
+    }
+
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(0, 12, 0, 24),
+      children: [
+        if (newMatches.isNotEmpty) ...[
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Text(
+              'New matches',
+              style: TextStyle(
+                color: colors.headerSecondaryText,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.3,
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 96,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              itemCount: newMatches.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 14),
+              itemBuilder: (context, index) {
+                final match = newMatches[index];
+                return GestureDetector(
+                  onTap: () async {
+                    await Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => ChatScreen(profile: conversation.profile),
+                        builder: (_) =>
+                            ChatScreen(auth: widget.auth, match: match),
                       ),
-                    ),
-                    child: Column(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(2.5),
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(color: colors.accent, width: 2),
-                          ),
-                          child: NetworkAvatar(
-                            url: conversation.profile.photoUrl,
-                            radius: 30,
-                          ),
+                    );
+                    if (!mounted) return;
+                    _load();
+                  },
+                  child: Column(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(2.5),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(color: colors.accent, width: 2),
                         ),
-                        const SizedBox(height: 6),
-                        Text(
-                          conversation.profile.name,
-                          style: TextStyle(
-                            color: colors.headerPrimaryText,
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w700,
-                          ),
+                        child: NetworkAvatar(
+                          url: match.primaryPhotoUrl,
+                          radius: 30,
                         ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-            ),
-            const SizedBox(height: 18),
-            Divider(height: 1, color: colors.divider),
-          ],
-          const SizedBox(height: 6),
-          if (others.isEmpty && newMatches.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 60),
-              child: Center(
-                child: Text(
-                  'No matches yet. Keep exploring Discover!',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: colors.headerSecondaryText,
-                    fontWeight: FontWeight.w700,
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        match.name,
+                        style: TextStyle(
+                          color: colors.headerPrimaryText,
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-              ),
-            )
-          else
-            ...others.map(
-              (conversation) => _ConversationTile(conversation: conversation),
+                );
+              },
             ),
+          ),
+          const SizedBox(height: 18),
+          Divider(height: 1, color: colors.divider),
         ],
-      ),
+        const SizedBox(height: 6),
+        ...others.map(
+          (match) => _ConversationTile(
+            auth: widget.auth,
+            match: match,
+            onOpened: _load,
+          ),
+        ),
+      ],
     );
   }
 }
 
 class _ConversationTile extends StatelessWidget {
-  const _ConversationTile({required this.conversation});
+  const _ConversationTile({
+    required this.auth,
+    required this.match,
+    required this.onOpened,
+  });
 
-  final MatchConversation conversation;
+  final AuthController auth;
+  final MatchConnection match;
+  final VoidCallback onOpened;
 
   @override
   Widget build(BuildContext context) {
@@ -134,15 +231,16 @@ class _ConversationTile extends StatelessWidget {
 
     return ListTile(
       contentPadding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => ChatScreen(profile: conversation.profile),
-        ),
-      ),
-      leading: NetworkAvatar(url: conversation.profile.photoUrl, radius: 27),
+      onTap: () async {
+        await Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => ChatScreen(auth: auth, match: match)),
+        );
+        onOpened();
+      },
+      leading: NetworkAvatar(url: match.primaryPhotoUrl, radius: 27),
       title: Text(
-        conversation.profile.name,
+        match.name,
         style: TextStyle(
           color: colors.headerPrimaryText,
           fontSize: 15,
@@ -150,41 +248,22 @@ class _ConversationTile extends StatelessWidget {
         ),
       ),
       subtitle: Text(
-        conversation.lastMessage,
+        match.lastMessage,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: TextStyle(
-          color: conversation.unread
-              ? colors.headerPrimaryText
-              : colors.headerSecondaryText,
+          color: colors.headerSecondaryText,
           fontSize: 12.5,
-          fontWeight: conversation.unread ? FontWeight.w700 : FontWeight.w600,
+          fontWeight: FontWeight.w600,
         ),
       ),
-      trailing: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Text(
-            conversation.timeAgo,
-            style: TextStyle(
-              color: colors.headerSecondaryText,
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          if (conversation.unread) ...[
-            const SizedBox(height: 6),
-            Container(
-              width: 9,
-              height: 9,
-              decoration: BoxDecoration(
-                color: colors.accent,
-                shape: BoxShape.circle,
-              ),
-            ),
-          ],
-        ],
+      trailing: Text(
+        _relativeTime(match.lastMessageAt),
+        style: TextStyle(
+          color: colors.headerSecondaryText,
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+        ),
       ),
     );
   }

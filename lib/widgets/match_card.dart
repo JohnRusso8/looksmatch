@@ -1,19 +1,19 @@
 import 'package:flutter/material.dart';
 
-import '../models/match_profile.dart';
+import '../models/discover_candidate.dart';
 import '../theme/app_theme.dart';
 import 'network_avatar.dart';
 
 class MatchCard extends StatelessWidget {
   const MatchCard({
     super.key,
-    required this.profile,
+    required this.candidate,
     required this.onTap,
     required this.onPass,
     required this.onConnect,
   });
 
-  final MatchProfile profile;
+  final DiscoverCandidate candidate;
   final VoidCallback onTap;
   final VoidCallback onPass;
   final VoidCallback onConnect;
@@ -45,7 +45,7 @@ class MatchCard extends StatelessWidget {
               children: [
                 AspectRatio(
                   aspectRatio: 4 / 5,
-                  child: NetworkPhoto(url: profile.photoUrl),
+                  child: NetworkPhoto(url: candidate.primaryPhotoUrl),
                 ),
                 Positioned.fill(
                   child: DecoratedBox(
@@ -63,93 +63,25 @@ class MatchCard extends StatelessWidget {
                   ),
                 ),
                 Positioned(
-                  top: 14,
-                  right: 14,
-                  child: _ScoreBadge(score: profile.looksMatchScore),
-                ),
-                Positioned(
                   left: 16,
                   right: 16,
                   bottom: 14,
-                  child: Row(
-                    children: [
-                      Flexible(
-                        child: Text(
-                          '${profile.name}, ${profile.age}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 21,
-                            fontWeight: FontWeight.w900,
-                          ),
-                        ),
-                      ),
-                      if (profile.verified) ...[
-                        const SizedBox(width: 6),
-                        const Icon(
-                          Icons.verified_rounded,
-                          color: Colors.white,
-                          size: 19,
-                        ),
-                      ],
-                      const SizedBox(width: 8),
-                      Icon(
-                        Icons.location_on_rounded,
-                        color: Colors.white.withOpacity(0.85),
-                        size: 14,
-                      ),
-                      const SizedBox(width: 2),
-                      Text(
-                        '${profile.distanceMiles.toStringAsFixed(1)} mi',
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.85),
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
+                  child: Text(
+                    candidate.age == null
+                        ? candidate.name
+                        : '${candidate.name}, ${candidate.age}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 21,
+                      fontWeight: FontWeight.w900,
+                    ),
                   ),
                 ),
               ],
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 13, 16, 13),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                ...profile.reasons.take(2).map(
-                      (reason) => Padding(
-                        padding: const EdgeInsets.only(bottom: 6),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Icon(
-                              Icons.check_circle_rounded,
-                              color: colors.accent,
-                              size: 16,
-                            ),
-                            const SizedBox(width: 7),
-                            Expanded(
-                              child: Text(
-                                reason,
-                                style: TextStyle(
-                                  color: colors.headerPrimaryText,
-                                  fontSize: 12.5,
-                                  height: 1.3,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-              ],
-            ),
-          ),
-          Divider(height: 1, color: colors.divider),
           Padding(
             padding: const EdgeInsets.all(12),
             child: Row(
@@ -190,39 +122,6 @@ class MatchCard extends StatelessWidget {
                   ),
                 ),
               ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ScoreBadge extends StatelessWidget {
-  const _ScoreBadge({required this.score});
-
-  final int score;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.45),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.white.withOpacity(0.5)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.auto_awesome_rounded, color: Colors.white, size: 14),
-          const SizedBox(width: 5),
-          Text(
-            '$score% match',
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 12,
-              fontWeight: FontWeight.w900,
             ),
           ),
         ],

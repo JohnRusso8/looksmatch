@@ -124,7 +124,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     setState(() => _submitting = true);
 
     try {
-      final photoUrls = await Future.wait(
+      final photos = await Future.wait(
         _photos.map((file) => widget.auth.uploadProfilePhoto(file)),
       );
 
@@ -133,7 +133,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
         birthDate: _birthDate!,
         gender: _gender!,
         interestedIn: _interestedIn!,
-        photoUrls: photoUrls,
+        photos: photos,
       );
       // No navigation here — AuthGate is watching Firestore for
       // profileCompleted and swaps to HomeShell on its own.

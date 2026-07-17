@@ -5,21 +5,78 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if request.auth != null;
       allow create: if request.auth != null && request.auth.uid == userId;
-      // Owners can edit their own profile, but never the scoring fields —
-      // those are written only by Cloud Functions via the Admin SDK, which
-      // bypasses these rules entirely. This stops a client from just
-      // setting its own scoreBand.
+      // Owners can edit their own profile, but never the scoring status
+      // fields — those are written only by Cloud Functions via the Admin
+      // SDK, which bypasses these rules entirely. The score/band itself is
+      // never on this document at all (see scores/{userId} below) — this
+      // just stops a client from spoofing its own status.
       allow update: if request.auth != null
         && request.auth.uid == userId
         && !request.resource.data.diff(resource.data).affectedKeys()
-              .hasAny(['scoringStatus', 'scoreBand', 'scoreRejectionReason', 'scoredAt']);
+              .hasAny(['scoringStatus', 'scoreRejectionReason', 'scoredAt']);
       allow delete: if false;
+
+      // Cloud-Function-only: today's match allocation and the permanent
+      // record of who this user has already liked/passed. Never exposed
+      // to any client directly — read via the getDailyMatches /
+      // recordMatchDecision callables instead.
+      match /dailyMatches/{date} {
+        allow read, write: if false;
+      }
+      match /interactions/{candidateId} {
+        allow read, write: if false;
+      }
+      match /receivedLikes/{likerId} {
+        allow read, write: if false;
+      }
     }
 
-    // Raw score, confidence, and scoring version — never client-readable.
-    // Only Cloud Functions (Admin SDK) touch this collection.
+    // Raw score, confidence, and band — never client-readable, not even by
+    // the profile's own owner. Only Cloud Functions (Admin SDK) touch this
+    // collection; the matching algorithm reads it, nothing displays it.
     match /scores/{userId} {
       allow read, write: if false;
+    }
+
+    // Bio, prompts, and the trait fields (ethnicity/height/etc) plus each
+    // field's own visibility choice and private matching prefs (age range,
+    // max distance). Owner can read/write their own directly — same trust
+    // level as users/{userId}. Other users never read this collection
+    // directly; they only see the visibility-filtered subset a Cloud
+    // Function hands back (see enrichSummaries in functions/index.js) —
+    // otherwise a client could read a "hidden" field straight off Firestore
+    // and bypass the visibility toggle entirely.
+    match /profileDetails/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Precise lat/lng — admin-only, same as scores/{userId}. Never
+    // client-readable (even by the owner, who always has a fresher reading
+    // on-device anyway) so no client can read another user's exact
+    // coordinates; only the rounded distanceMiles a Cloud Function computes
+    // ever reaches a client. Written via the updateLocation callable.
+    match /locations/{userId} {
+      allow read, write: if false;
+    }
+
+    // Mutual matches. Created only by Cloud Functions (createConnection),
+    // never directly by a client — participants can read it (and list
+    // their own matches), but the doc itself (including the lastMessage
+    // preview) is only ever written by the onMessageCreated trigger.
+    match /connections/{connectionId} {
+      allow read: if request.auth != null && request.auth.uid in resource.data.userIds;
+      allow write: if false;
+
+      match /messages/{messageId} {
+        allow read: if request.auth != null
+          && request.auth.uid in
+              get(/databases/$(database)/documents/connections/$(connectionId)).data.userIds;
+        allow create: if request.auth != null
+          && request.auth.uid in
+              get(/databases/$(database)/documents/connections/$(connectionId)).data.userIds
+          && request.resource.data.senderId == request.auth.uid;
+        allow update, delete: if false;
+      }
     }
   }
 }

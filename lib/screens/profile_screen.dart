@@ -1,20 +1,16 @@
 import 'package:flutter/material.dart';
 
+import '../services/auth_controller.dart';
 import '../theme/app_theme.dart';
 import '../widgets/network_avatar.dart';
 import '../widgets/sign_out_dialog.dart';
+import 'edit_profile_screen.dart';
+import 'scoring_screen.dart';
 
 class ProfileScreen extends StatelessWidget {
-  const ProfileScreen({super.key, required this.onSignOut});
+  const ProfileScreen({super.key, required this.auth});
 
-  final Future<void> Function() onSignOut;
-
-  static const String _myPhoto = 'https://i.pravatar.cc/600?img=68';
-  static const List<String> _myPhotos = [
-    'https://i.pravatar.cc/600?img=68',
-    'https://i.pravatar.cc/600?img=60',
-    'https://i.pravatar.cc/600?img=65',
-  ];
+  final AuthController auth;
 
   @override
   Widget build(BuildContext context) {
@@ -40,7 +36,7 @@ class ProfileScreen extends StatelessWidget {
           IconButton(
             tooltip: 'Log out',
             onPressed: () =>
-                confirmSignOut(context: context, onSignOut: onSignOut),
+                confirmSignOut(context: context, onSignOut: auth.signOut),
             icon: Icon(Icons.logout_rounded, color: colors.headerIconColor),
           ),
           IconButton(
@@ -50,174 +46,176 @@ class ProfileScreen extends StatelessWidget {
           ),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
-        children: [
-          Center(
-            child: Stack(
-              children: [
-                NetworkAvatar(url: _myPhoto, radius: 56),
-                Positioned(
-                  right: 0,
-                  bottom: 0,
-                  child: Container(
-                    width: 32,
-                    height: 32,
-                    decoration: BoxDecoration(
-                      color: colors.primaryButtonBackground,
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: colors.pageBackground,
-                        width: 3,
-                      ),
-                    ),
-                    child: Icon(
-                      Icons.edit_rounded,
-                      color: colors.primaryButtonText,
-                      size: 15,
+      body: StreamBuilder<Map<String, dynamic>?>(
+        stream: auth.watchProfile(),
+        builder: (context, snapshot) {
+          final profile = snapshot.data;
+          final name = (profile?['name'] as String?)?.trim();
+          final rawPhotos = profile?['photos'];
+          final photos = rawPhotos is List
+              ? rawPhotos.whereType<Map>().toList()
+              : const <Map>[];
+          final primaryPhotoUrl =
+              photos.isEmpty ? '' : (photos.first['url'] ?? '').toString();
+          final status = profile?['scoringStatus'] as String?;
+
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
+            children: [
+              Center(
+                child: GestureDetector(
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => EditProfileScreen(auth: auth),
                     ),
                   ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 14),
-          Center(
-            child: Text(
-              'You',
-              style: TextStyle(
-                color: colors.headerPrimaryText,
-                fontSize: 21,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-          ),
-          const SizedBox(height: 4),
-          Center(
-            child: Text(
-              'Complete your profile to improve your LooksMatch score.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: colors.headerSecondaryText,
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-          const SizedBox(height: 22),
-          Container(
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              color: colors.scoreBackground,
-              borderRadius: BorderRadius.circular(22),
-              border: Border.all(color: colors.accent.withOpacity(0.30)),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 64,
-                  height: 64,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: colors.pageBackground,
-                    border: Border.all(color: colors.accent, width: 2.5),
-                  ),
-                  child: Text(
-                    '91',
-                    style: TextStyle(
-                      color: colors.accent,
-                      fontSize: 20,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  child: Stack(
                     children: [
-                      Text(
-                        'Your LooksMatch Score',
-                        style: TextStyle(
-                          color: colors.headerPrimaryText,
-                          fontSize: 14.5,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Top 12% in your area this week.',
-                        style: TextStyle(
-                          color: colors.headerSecondaryText,
-                          fontSize: 12,
-                          height: 1.35,
-                          fontWeight: FontWeight.w600,
+                      if (primaryPhotoUrl.isEmpty)
+                        CircleAvatar(
+                          radius: 56,
+                          backgroundColor: colors.inputBackground,
+                          child: Icon(
+                            Icons.person_rounded,
+                            color: colors.headerSecondaryText,
+                            size: 48,
+                          ),
+                        )
+                      else
+                        NetworkAvatar(url: primaryPhotoUrl, radius: 56),
+                      Positioned(
+                        right: 0,
+                        bottom: 0,
+                        child: Container(
+                          width: 32,
+                          height: 32,
+                          decoration: BoxDecoration(
+                            color: colors.primaryButtonBackground,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: colors.pageBackground,
+                              width: 3,
+                            ),
+                          ),
+                          child: Icon(
+                            Icons.edit_rounded,
+                            color: colors.primaryButtonText,
+                            size: 15,
+                          ),
                         ),
                       ),
                     ],
                   ),
                 ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 22),
-          Text(
-            'Photos',
-            style: TextStyle(
-              color: colors.headerPrimaryText,
-              fontSize: 16,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          const SizedBox(height: 10),
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: _myPhotos.length + 1,
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 3,
-              crossAxisSpacing: 9,
-              mainAxisSpacing: 9,
-              childAspectRatio: 0.78,
-            ),
-            itemBuilder: (context, index) {
-              if (index == _myPhotos.length) {
-                return DottedAddTile(colors: colors);
-              }
-              return NetworkPhoto(url: _myPhotos[index], borderRadius: 16);
-            },
-          ),
-          const SizedBox(height: 24),
-          _menuTile(
-            colors: colors,
-            icon: Icons.person_outline_rounded,
-            label: 'Edit Profile',
-          ),
-          _menuTile(
-            colors: colors,
-            icon: Icons.tune_rounded,
-            label: 'Match Preferences',
-          ),
-          _menuTile(
-            colors: colors,
-            icon: Icons.shield_outlined,
-            label: 'Privacy & Safety',
-          ),
-          _menuTile(
-            colors: colors,
-            icon: Icons.help_outline_rounded,
-            label: 'Help & Support',
-          ),
-          const SizedBox(height: 14),
-          _menuTile(
-            colors: colors,
-            icon: Icons.logout_rounded,
-            label: 'Log Out',
-            destructive: true,
-            onTap: () => confirmSignOut(context: context, onSignOut: onSignOut),
-          ),
-        ],
+              ),
+              const SizedBox(height: 14),
+              Center(
+                child: Text(
+                  (name == null || name.isEmpty) ? 'You' : name,
+                  style: TextStyle(
+                    color: colors.headerPrimaryText,
+                    fontSize: 21,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Center(
+                child: Text(
+                  'Complete your profile to start getting matched.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: colors.headerSecondaryText,
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 22),
+              _ScoreCard(
+                colors: colors,
+                status: status,
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => ScoringScreen(auth: auth)),
+                ),
+              ),
+              const SizedBox(height: 22),
+              Text(
+                'Photos',
+                style: TextStyle(
+                  color: colors.headerPrimaryText,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 10),
+              GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: photos.length + 1,
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 3,
+                  crossAxisSpacing: 9,
+                  mainAxisSpacing: 9,
+                  childAspectRatio: 0.78,
+                ),
+                itemBuilder: (context, index) {
+                  if (index == photos.length) {
+                    return GestureDetector(
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => EditProfileScreen(auth: auth),
+                        ),
+                      ),
+                      child: DottedAddTile(colors: colors),
+                    );
+                  }
+                  final url = (photos[index]['url'] ?? '').toString();
+                  return NetworkPhoto(url: url, borderRadius: 16);
+                },
+              ),
+              const SizedBox(height: 24),
+              _menuTile(
+                colors: colors,
+                icon: Icons.person_outline_rounded,
+                label: 'Edit Profile',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => EditProfileScreen(auth: auth),
+                  ),
+                ),
+              ),
+              _menuTile(
+                colors: colors,
+                icon: Icons.tune_rounded,
+                label: 'Match Preferences',
+              ),
+              _menuTile(
+                colors: colors,
+                icon: Icons.shield_outlined,
+                label: 'Privacy & Safety',
+              ),
+              _menuTile(
+                colors: colors,
+                icon: Icons.help_outline_rounded,
+                label: 'Help & Support',
+              ),
+              const SizedBox(height: 14),
+              _menuTile(
+                colors: colors,
+                icon: Icons.logout_rounded,
+                label: 'Log Out',
+                destructive: true,
+                onTap: () =>
+                    confirmSignOut(context: context, onSignOut: auth.signOut),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -261,6 +259,100 @@ class ProfileScreen extends StatelessWidget {
                 color: colors.headerSecondaryText,
               ),
         onTap: onTap ?? () {},
+      ),
+    );
+  }
+}
+
+class _ScoreCard extends StatelessWidget {
+  const _ScoreCard({
+    required this.colors,
+    required this.status,
+    required this.onTap,
+  });
+
+  final LooksMatchColors colors;
+  final String? status;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final String title;
+    final String subtitle;
+    final Widget badge;
+
+    // Deliberately no number anywhere here — the score itself never
+    // reaches the client, only this status flag. Matching happens
+    // server-side; this card is just an entry point into ScoringScreen.
+    if (status == 'scored') {
+      title = 'You\'re Being Matched';
+      subtitle = 'We\'re using your photo to find your best matches.';
+      badge = Icon(Icons.favorite_rounded, color: colors.accent);
+    } else if (status == 'rejected') {
+      title = 'We couldn\'t use your last photo';
+      subtitle = 'Tap to try a different photo.';
+      badge = Icon(Icons.priority_high_rounded, color: colors.deleteBackground);
+    } else {
+      title = 'Get Discovered';
+      subtitle = 'Submit a photo so we can start finding your matches.';
+      badge = Icon(Icons.auto_awesome_rounded, color: colors.accent);
+    }
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(22),
+        child: Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: colors.scoreBackground,
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: colors.accent.withOpacity(0.30)),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 64,
+                height: 64,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: colors.pageBackground,
+                  border: Border.all(color: colors.accent, width: 2.5),
+                ),
+                child: badge,
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        color: colors.headerPrimaryText,
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        color: colors.headerSecondaryText,
+                        fontSize: 12,
+                        height: 1.35,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right_rounded, color: colors.headerSecondaryText),
+            ],
+          ),
+        ),
       ),
     );
   }

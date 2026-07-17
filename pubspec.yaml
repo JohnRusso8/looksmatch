@@ -39,6 +39,8 @@ dependencies:
   cloud_firestore: ^6.7.1
   firebase_storage: ^13.4.5
   image_picker: ^1.1.2
+  cloud_functions: ^6.3.5
+  geocoding: ^5.0.0
 
 dev_dependencies:
   flutter_test:

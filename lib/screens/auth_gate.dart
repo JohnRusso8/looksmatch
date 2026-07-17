@@ -31,7 +31,7 @@ class AuthGate extends StatelessWidget {
             }
 
             return snapshot.data == true
-                ? HomeShell(onSignOut: auth.signOut)
+                ? HomeShell(auth: auth)
                 : ProfileSetupScreen(auth: auth);
           },
         );
