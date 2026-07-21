@@ -33,6 +33,13 @@ const SAMPLES_PER_PHOTO = 1;
 const SCORING_VERSION = 'v4-analytical-harsh-scoring';
 const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
 
+// Floor on the stored raw score — the harsh rubric already lets Gemini
+// score all the way down to 1, but nobody in the app should ever see
+// themselves land a 1/10 or 2/10 band. 30 is the lowest raw score that
+// still floors to band 3 (see scoreToBand below), so 3/10 is the worst
+// anyone can get.
+const MIN_RAW_SCORE = 30;
+
 // Rekognition validation thresholds — all tunable. Deliberately not using
 // Rekognition's Gender or AgeRange attributes anywhere in this file: only
 // structural/quality attributes (pose, sharpness, brightness, occlusion)
@@ -55,7 +62,9 @@ const MODERATION_CONFIDENCE_THRESHOLD = 80;
 // and "Revealing Clothes"/"Swimwear" are entirely different categories.
 // Only reject on the tiers that are actually inappropriate for a dating
 // app; swimwear, revealing clothes, kissing, alcohol, etc. are completely
-// normal profile-photo content and must not trip this.
+// normal profile-photo content and must not trip this. Blocking the whole
+// "Explicit Nudity" category covers fully exposed breasts/genitals/sexual
+// activity (boobs, vagina, penis) regardless of gender.
 const BLOCKED_MODERATION_CATEGORIES = new Set([
   'Explicit Nudity',
   'Violence',
@@ -63,6 +72,15 @@ const BLOCKED_MODERATION_CATEGORIES = new Set([
   'Drugs & Tobacco',
   'Hate Symbols',
 ]);
+
+// These sit under the otherwise-allowed "Suggestive" parent category (which
+// also covers swimwear/bikinis and shirtless men — both fine for a dating
+// app), so they can't be blocked by parent alone without also blocking
+// bikinis. "Partial Nudity" specifically means exposed intimate
+// areas/buttocks without swimwear coverage — block that one sub-label by
+// name while leaving its siblings (Female/Male Swimwear Or Underwear,
+// Barechested Male, Revealing Clothes) untouched.
+const BLOCKED_MODERATION_LABELS = new Set(['Partial Nudity']);
 
 const SCORE_SCHEMA = {
   type: 'object',
@@ -198,23 +216,53 @@ async function validateWithRekognition(rekognitionClient, buffer) {
     return {valid: false, reason: 'extreme_pose'};
   }
 
-  const moderationResult = await rekognitionClient.send(
+  const moderationLabels = await detectModerationLabels(rekognitionClient, buffer);
+  const blockedLabel = findBlockedModerationLabel(moderationLabels);
+
+  if (blockedLabel) {
+    // Logged so the exact label/parent/confidence strings Rekognition
+    // actually returns can be checked against real photos and the blocked
+    // sets retuned with real data, same reasoning as the sharpness logging
+    // above — never guess taxonomy strings blind twice.
+    console.log(
+      `validateWithRekognition inappropriate_content: label=${blockedLabel.Name} ` +
+        `parent=${blockedLabel.ParentName} confidence=${blockedLabel.Confidence}`,
+    );
+    return {valid: false, reason: 'inappropriate_content'};
+  }
+
+  return {valid: true, reason: 'none'};
+}
+
+async function detectModerationLabels(rekognitionClient, buffer) {
+  const result = await rekognitionClient.send(
     new DetectModerationLabelsCommand({
       Image: {Bytes: buffer},
       MinConfidence: MODERATION_CONFIDENCE_THRESHOLD,
     }),
   );
+  return result.ModerationLabels || [];
+}
 
-  const hasBlockedContent = (moderationResult.ModerationLabels || []).some(
+// Shared by validateWithRekognition (the score-photo path) and
+// moderatePhoto (every other photo upload) so the two can never silently
+// drift apart on what counts as inappropriate.
+function findBlockedModerationLabel(moderationLabels) {
+  return moderationLabels.find(
     (label) =>
-      BLOCKED_MODERATION_CATEGORIES.has(label.ParentName || label.Name),
+      BLOCKED_MODERATION_CATEGORIES.has(label.ParentName || label.Name) ||
+      BLOCKED_MODERATION_LABELS.has(label.Name),
   );
+}
 
-  if (hasBlockedContent) {
-    return {valid: false, reason: 'inappropriate_content'};
-  }
-
-  return {valid: true, reason: 'none'};
+function newRekognitionClient() {
+  return new RekognitionClient({
+    region: AWS_REGION,
+    credentials: {
+      accessKeyId: AWS_ACCESS_KEY_ID.value(),
+      secretAccessKey: AWS_SECRET_ACCESS_KEY.value(),
+    },
+  });
 }
 
 async function scoreOnce(model, imagePart) {
@@ -271,13 +319,7 @@ exports.scorePhoto = onCall(
     const userRef = db.collection('users').doc(uid);
     const scoreRef = db.collection('scores').doc(uid);
 
-    const rekognitionClient = new RekognitionClient({
-      region: AWS_REGION,
-      credentials: {
-        accessKeyId: AWS_ACCESS_KEY_ID.value(),
-        secretAccessKey: AWS_SECRET_ACCESS_KEY.value(),
-      },
-    });
+    const rekognitionClient = newRekognitionClient();
 
     const validation = await validateWithRekognition(rekognitionClient, buffer);
 
@@ -318,7 +360,8 @@ exports.scorePhoto = onCall(
       attempts.push(await scoreOnce(model, imagePart));
     }
 
-    const finalScore = median(attempts.map((a) => a.score));
+    const medianScore = median(attempts.map((a) => a.score));
+    const finalScore = Math.max(medianScore, MIN_RAW_SCORE);
     const finalConfidence =
       attempts.reduce((sum, a) => sum + a.confidence, 0) / attempts.length;
     const band = scoreToBand(finalScore);
@@ -347,6 +390,66 @@ exports.scorePhoto = onCall(
     );
 
     return {status: 'scored'};
+  },
+);
+
+// Runs content moderation on any already-uploaded profile photo — called
+// for every photo added to a profile, not just the one submitted for
+// scoring (scorePhoto only ever validates the single photo it's given, and
+// most photos never go through that flow at all). Rejects and deletes the
+// Storage file if it fails; approves otherwise. Deliberately skips the
+// sharpness/brightness/pose checks scorePhoto does — those are specific to
+// what makes a good *scoring* photo, not a reason to reject an otherwise
+// fine casual profile photo.
+exports.moderatePhoto = onCall(
+  {
+    secrets: [AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY],
+    region: 'us-central1',
+  },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Sign in required.');
+    }
+
+    const storagePath = request.data?.storagePath;
+    if (
+      typeof storagePath !== 'string' ||
+      !storagePath.startsWith(`profile_photos/${uid}/`)
+    ) {
+      throw new HttpsError('invalid-argument', 'Invalid storage path.');
+    }
+
+    const bucket = getStorage().bucket();
+    const file = bucket.file(storagePath);
+    const [exists] = await file.exists();
+    if (!exists) {
+      throw new HttpsError('not-found', 'Photo not found in storage.');
+    }
+
+    const [metadata] = await file.getMetadata();
+    if (Number(metadata.size) > MAX_PHOTO_BYTES) {
+      throw new HttpsError('invalid-argument', 'Photo is too large.');
+    }
+
+    const [buffer] = await file.download();
+    const rekognitionClient = newRekognitionClient();
+    const moderationLabels = await detectModerationLabels(rekognitionClient, buffer);
+    const blockedLabel = findBlockedModerationLabel(moderationLabels);
+
+    if (blockedLabel) {
+      console.log(
+        `moderatePhoto rejected uid=${uid} label=${blockedLabel.Name} ` +
+          `parent=${blockedLabel.ParentName} confidence=${blockedLabel.Confidence}`,
+      );
+      // Delete immediately — an unapproved photo should never sit around
+      // referenced by nothing, and never get a second chance to be added
+      // to a profile via a stale URL a client might still be holding.
+      await file.delete().catch(() => {});
+      return {approved: false};
+    }
+
+    return {approved: true};
   },
 );
 
@@ -479,9 +582,11 @@ const DISPLAYABLE_PROFILE_FIELDS = [
 // excludes ethnicity (same anti-bias reasoning as keeping race out of the
 // looks score entirely) and anything that isn't really a "compatibility"
 // signal (height, college, bio). Multi-select fields (interests, values,
-// music, food, dating intentions) are scored separately below since
-// they're sets, not single values.
+// music, food) are scored separately below since they're sets, not single
+// values. The two groups are weighted 40/60 — shared lifestyle/taste
+// outweighs a handful of single-answer questions.
 const COMPATIBILITY_MATCH_WEIGHTS = {
+  datingIntention: 15,
   relationshipType: 10,
   drinking: 5,
   smoking: 5,
@@ -490,15 +595,12 @@ const COMPATIBILITY_MATCH_WEIGHTS = {
 
 // Each multi-select category contributes up to maxPoints, reached once
 // `cap` items are shared — further overlap beyond the cap doesn't add more,
-// so one person listing 20 interests can't dominate the score. Dating
-// intentions gets a lower cap than the others since it only has ~7 options
-// total and picking most of them shouldn't be as easy to max out.
+// so one person listing 20 interests can't dominate the score.
 const COMPATIBILITY_OVERLAP_CATEGORIES = {
   interests: {maxPoints: 15, cap: 4},
   values: {maxPoints: 15, cap: 4},
   musicGenres: {maxPoints: 15, cap: 4},
   favoriteFoods: {maxPoints: 15, cap: 4},
-  datingIntention: {maxPoints: 15, cap: 2},
 };
 
 function fieldMutuallyVisible(a, b, field) {

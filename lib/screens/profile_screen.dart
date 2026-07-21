@@ -1,14 +1,98 @@
 import 'package:flutter/material.dart';
 
+import '../models/discover_candidate.dart';
+import '../models/profile_details.dart';
+import '../models/profile_extras.dart';
 import '../services/auth_controller.dart';
 import '../services/profile_cache.dart';
 import '../theme/app_theme.dart';
-import '../widgets/network_avatar.dart';
 import 'admin_review_screen.dart';
 import 'edit_profile_screen.dart';
+import 'match_profile_screen.dart';
 import 'preferences_screen.dart';
 import 'scoring_screen.dart';
 import 'settings_screen.dart';
+
+DateTime? _parseBirthDate(dynamic value) {
+  if (value == null) return null;
+  // Firestore Timestamp — avoid importing cloud_firestore here just for
+  // this by duck-typing the toDate() call, same as EditProfileScreen.
+  try {
+    return (value as dynamic).toDate() as DateTime;
+  } catch (_) {
+    return null;
+  }
+}
+
+int? _calculateAge(DateTime? birthDate) {
+  if (birthDate == null) return null;
+  final now = DateTime.now();
+  var age = now.year - birthDate.year;
+  final hadBirthdayThisYear =
+      now.month > birthDate.month ||
+      (now.month == birthDate.month && now.day >= birthDate.day);
+  if (!hadBirthdayThisYear) age--;
+  return age;
+}
+
+/// Builds the same shape of candidate a match would see of you, so the
+/// Profile tab can render through the exact same ProfileContentView used
+/// for everyone else's profile — "how others see you" and "how you see
+/// them" can never silently drift apart. Built entirely from data already
+/// in the cache; hobbyPhotoUrl/foodPhotoUrl are computed locally from the
+/// raw photos array instead of waiting on a server round-trip, since it's
+/// the same data summarizeUserDoc would derive server-side for anyone else.
+DiscoverCandidate _selfPreviewCandidate(
+  AuthController auth,
+  Map<String, dynamic>? profile,
+  ProfileDetails details,
+) {
+  final rawPhotos = profile?['photos'];
+  final photos = rawPhotos is List
+      ? rawPhotos.whereType<Map>().toList()
+      : const <Map>[];
+  final photoUrls = photos
+      .map((photo) => (photo['url'] ?? '').toString())
+      .where((url) => url.isNotEmpty)
+      .toList();
+
+  String? categoryPhotoUrl(String category) {
+    for (final photo in photos) {
+      if (photo['category'] == category) {
+        final url = (photo['url'] ?? '').toString();
+        if (url.isNotEmpty) return url;
+      }
+    }
+    return null;
+  }
+
+  return DiscoverCandidate(
+    uid: auth.currentUserId ?? '',
+    name: (profile?['name'] ?? '').toString(),
+    age: _calculateAge(_parseBirthDate(profile?['birthDate'])),
+    primaryPhotoUrl: photoUrls.isEmpty ? '' : photoUrls.first,
+    photoUrls: photoUrls,
+    extras: ProfileExtras(
+      bio: details.bio,
+      prompts: details.prompts,
+      interests: details.interests,
+      values: details.values,
+      musicGenres: details.musicGenres,
+      favoriteFoods: details.favoriteFoods,
+      ethnicities: details.ethnicities,
+      relationshipType: details.relationshipType,
+      datingIntention: details.datingIntention,
+      heightInches: details.heightInches,
+      drinking: details.drinking,
+      smoking: details.smoking,
+      educationLevel: details.educationLevel,
+      familyPlans: details.familyPlans,
+      college: details.college,
+      hobbyPhotoUrl: categoryPhotoUrl('hobby'),
+      foodPhotoUrl: categoryPhotoUrl('food'),
+    ),
+  );
+}
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({
@@ -57,6 +141,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
         actions: [
           IconButton(
+            tooltip: 'Edit Profile',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => EditProfileScreen(
+                  auth: auth,
+                  profileCache: widget.profileCache,
+                ),
+              ),
+            ),
+            icon: Icon(Icons.edit_outlined, color: colors.headerIconColor),
+          ),
+          IconButton(
             tooltip: 'Settings',
             onPressed: () => Navigator.push(
               context,
@@ -75,81 +172,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
         listenable: widget.profileCache,
         builder: (context, _) {
           final profile = widget.profileCache.profile;
-          final name = (profile?['name'] as String?)?.trim();
-          final rawPhotos = profile?['photos'];
-          final photos = rawPhotos is List
-              ? rawPhotos.whereType<Map>().toList()
-              : const <Map>[];
-          final primaryPhotoUrl = photos.isEmpty
-              ? ''
-              : (photos.first['url'] ?? '').toString();
+          final details = widget.profileCache.details;
           final status = profile?['scoringStatus'] as String?;
+          final candidate = _selfPreviewCandidate(auth, profile, details);
 
           return ListView(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
+            padding: const EdgeInsets.fromLTRB(0, 8, 0, 28),
             children: [
-              Center(
-                child: GestureDetector(
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => EditProfileScreen(
-                        auth: auth,
-                        profileCache: widget.profileCache,
-                      ),
-                    ),
-                  ),
-                  child: Stack(
-                    children: [
-                      if (primaryPhotoUrl.isEmpty)
-                        CircleAvatar(
-                          radius: 56,
-                          backgroundColor: colors.inputBackground,
-                          child: Icon(
-                            Icons.person_rounded,
-                            color: colors.headerSecondaryText,
-                            size: 48,
-                          ),
-                        )
-                      else
-                        NetworkAvatar(url: primaryPhotoUrl, radius: 56),
-                      Positioned(
-                        right: 0,
-                        bottom: 0,
-                        child: Container(
-                          width: 32,
-                          height: 32,
-                          decoration: BoxDecoration(
-                            color: colors.primaryButtonBackground,
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: colors.pageBackground,
-                              width: 3,
-                            ),
-                          ),
-                          child: Icon(
-                            Icons.edit_rounded,
-                            color: colors.primaryButtonText,
-                            size: 15,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 14),
-              Center(
-                child: Text(
-                  (name == null || name.isEmpty) ? 'You' : name,
-                  style: TextStyle(
-                    color: colors.headerPrimaryText,
-                    fontSize: 21,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 6),
               Center(
                 child: GestureDetector(
                   onTap: () => Navigator.push(
@@ -171,10 +200,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                       const SizedBox(width: 3),
                       Text(
-                        widget.profileCache.details.city.isNotEmpty &&
-                                widget.profileCache.details.state != null
-                            ? '${widget.profileCache.details.city}, '
-                                  '${widget.profileCache.details.state}'
+                        details.city.isNotEmpty && details.state != null
+                            ? '${details.city}, ${details.state}'
                             : 'Set your location',
                         style: TextStyle(
                           color: colors.accent,
@@ -186,137 +213,95 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 ),
               ),
-              const SizedBox(height: 4),
-              Center(
-                child: Text(
-                  'Complete your profile to start getting matched.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: colors.headerSecondaryText,
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
+              const SizedBox(height: 10),
+              // This is exactly what a match sees of you — same
+              // ProfileContentView as MatchProfileScreen, with an empty
+              // ProfileDetails() so nothing renders as "matched" (comparing
+              // yourself to yourself isn't meaningful). Tap the pencil icon
+              // in the app bar to edit.
+              ProfileContentView(
+                candidate: candidate,
+                myDetails: const ProfileDetails(),
               ),
               const SizedBox(height: 22),
-              _ScoreCard(
-                colors: colors,
-                status: status,
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => ScoringScreen(
-                      auth: auth,
-                      profileCache: widget.profileCache,
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: _ScoreCard(
+                  colors: colors,
+                  status: status,
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => ScoringScreen(
+                        auth: auth,
+                        profileCache: widget.profileCache,
+                      ),
                     ),
                   ),
                 ),
               ),
               const SizedBox(height: 22),
-              Text(
-                'Photos',
-                style: TextStyle(
-                  color: colors.headerPrimaryText,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              const SizedBox(height: 10),
-              GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: photos.length + 1,
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 3,
-                  crossAxisSpacing: 9,
-                  mainAxisSpacing: 9,
-                  childAspectRatio: 0.78,
-                ),
-                itemBuilder: (context, index) {
-                  if (index == photos.length) {
-                    return GestureDetector(
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Column(
+                  children: [
+                    _menuTile(
+                      colors: colors,
+                      icon: Icons.tune_rounded,
+                      label: 'Match Preferences',
                       onTap: () => Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) => EditProfileScreen(
+                          builder: (_) => PreferencesScreen(
                             auth: auth,
                             profileCache: widget.profileCache,
                           ),
                         ),
                       ),
-                      child: DottedAddTile(colors: colors),
-                    );
-                  }
-                  final url = (photos[index]['url'] ?? '').toString();
-                  return NetworkPhoto(url: url, borderRadius: 16);
-                },
-              ),
-              const SizedBox(height: 24),
-              _menuTile(
-                colors: colors,
-                icon: Icons.person_outline_rounded,
-                label: 'Edit Profile',
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => EditProfileScreen(
-                      auth: auth,
-                      profileCache: widget.profileCache,
                     ),
-                  ),
+                    _menuTile(
+                      colors: colors,
+                      icon: Icons.shield_outlined,
+                      label: 'Privacy & Safety',
+                    ),
+                    _menuTile(
+                      colors: colors,
+                      icon: Icons.help_outline_rounded,
+                      label: 'Help & Support',
+                    ),
+                    // Only reviewers (adminConfig.reviewerUids — see
+                    // functions/index.js) see this at all; every action inside
+                    // the screen it opens is re-verified server-side regardless.
+                    FutureBuilder<bool>(
+                      future: _reviewerStatus,
+                      builder: (context, snapshot) {
+                        if (snapshot.hasError) {
+                          // Surfaced rather than silently hidden — a failed
+                          // reviewer check used to look identical to "not a
+                          // reviewer", which made this impossible to debug from
+                          // the UI alone.
+                          debugPrint(
+                            'checkReviewerStatus failed: ${snapshot.error}',
+                          );
+                          return const SizedBox.shrink();
+                        }
+                        if (snapshot.data != true)
+                          return const SizedBox.shrink();
+                        return _menuTile(
+                          colors: colors,
+                          icon: Icons.admin_panel_settings_outlined,
+                          label: 'Review Queue',
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => AdminReviewScreen(auth: auth),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
                 ),
-              ),
-              _menuTile(
-                colors: colors,
-                icon: Icons.tune_rounded,
-                label: 'Match Preferences',
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => PreferencesScreen(
-                      auth: auth,
-                      profileCache: widget.profileCache,
-                    ),
-                  ),
-                ),
-              ),
-              _menuTile(
-                colors: colors,
-                icon: Icons.shield_outlined,
-                label: 'Privacy & Safety',
-              ),
-              _menuTile(
-                colors: colors,
-                icon: Icons.help_outline_rounded,
-                label: 'Help & Support',
-              ),
-              // Only reviewers (adminConfig.reviewerUids — see
-              // functions/index.js) see this at all; every action inside
-              // the screen it opens is re-verified server-side regardless.
-              FutureBuilder<bool>(
-                future: _reviewerStatus,
-                builder: (context, snapshot) {
-                  if (snapshot.hasError) {
-                    // Surfaced rather than silently hidden — a failed
-                    // reviewer check used to look identical to "not a
-                    // reviewer", which made this impossible to debug from
-                    // the UI alone.
-                    debugPrint('checkReviewerStatus failed: ${snapshot.error}');
-                    return const SizedBox.shrink();
-                  }
-                  if (snapshot.data != true) return const SizedBox.shrink();
-                  return _menuTile(
-                    colors: colors,
-                    icon: Icons.admin_panel_settings_outlined,
-                    label: 'Review Queue',
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => AdminReviewScreen(auth: auth),
-                      ),
-                    ),
-                  );
-                },
               ),
             ],
           );
@@ -462,24 +447,6 @@ class _ScoreCard extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-class DottedAddTile extends StatelessWidget {
-  const DottedAddTile({super.key, required this.colors});
-
-  final LooksMatchColors colors;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: colors.inputBackground,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: colors.accent.withOpacity(0.45), width: 1.4),
-      ),
-      child: Icon(Icons.add_a_photo_outlined, color: colors.accent),
     );
   }
 }

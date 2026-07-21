@@ -29,7 +29,7 @@ class ProfileExtras {
     this.favoriteFoods = const [],
     this.ethnicities = const [],
     this.relationshipType,
-    this.datingIntentions = const [],
+    this.datingIntention,
     this.heightInches,
     this.drinking,
     this.smoking,
@@ -54,15 +54,26 @@ class ProfileExtras {
           : const <String>[];
     }
 
-    // ethnicity/datingIntention used to be a single string before these
-    // became multi-select — accept either shape so an already-saved single
-    // value still shows up instead of silently disappearing.
+    // ethnicity used to be a single string before it became multi-select —
+    // accept either shape so an already-saved single value still shows up
+    // instead of silently disappearing.
     List<String> parseMultiOrLegacySingle(dynamic raw) {
       if (raw is List) {
         return raw.map((i) => i.toString()).where((i) => i.isNotEmpty).toList();
       }
       if (raw is String && raw.isNotEmpty) return [raw];
       return const <String>[];
+    }
+
+    // datingIntention briefly became multi-select and then reverted — some
+    // already-saved profiles may still have a one-item list from that
+    // window, so accept either shape and just take the first value.
+    String? parseSingleOrLegacyList(dynamic raw) {
+      if (raw is List) {
+        return raw.isNotEmpty ? raw.first.toString() : null;
+      }
+      if (raw is String && raw.isNotEmpty) return raw;
+      return null;
     }
 
     return ProfileExtras(
@@ -74,7 +85,7 @@ class ProfileExtras {
       favoriteFoods: parseStringList(map['favoriteFoods']),
       ethnicities: parseMultiOrLegacySingle(map['ethnicity']),
       relationshipType: map['relationshipType'] as String?,
-      datingIntentions: parseMultiOrLegacySingle(map['datingIntention']),
+      datingIntention: parseSingleOrLegacyList(map['datingIntention']),
       heightInches: (map['height'] as num?)?.toInt(),
       drinking: map['drinking'] as String?,
       smoking: map['smoking'] as String?,
@@ -100,7 +111,7 @@ class ProfileExtras {
   final List<String> favoriteFoods;
   final List<String> ethnicities;
   final String? relationshipType;
-  final List<String> datingIntentions;
+  final String? datingIntention;
   final int? heightInches;
   final String? drinking;
   final String? smoking;
@@ -134,7 +145,7 @@ class ProfileExtras {
       favoriteFoods.isNotEmpty ||
       ethnicities.isNotEmpty ||
       relationshipType != null ||
-      datingIntentions.isNotEmpty ||
+      datingIntention != null ||
       heightInches != null ||
       drinking != null ||
       smoking != null ||

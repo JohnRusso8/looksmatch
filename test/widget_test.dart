@@ -51,6 +51,9 @@ class _FakeAuthController extends AuthController {
       const ProfilePhoto(url: '', storagePath: '');
 
   @override
+  Future<bool> moderatePhoto(String storagePath) async => true;
+
+  @override
   Future<void> deleteProfilePhoto(String storagePath) async {}
 
   @override
@@ -75,11 +78,8 @@ class _FakeAuthController extends AuthController {
   Future<void> submitPhotoForScoring(String storagePath) async {}
 
   @override
-  Future<DailyMatches> getDailyMatches() async => const DailyMatches(
-    candidates: [],
-    decisions: {},
-    hasMore: false,
-  );
+  Future<DailyMatches> getDailyMatches() async =>
+      const DailyMatches(candidates: [], decisions: {}, hasMore: false);
 
   @override
   Future<bool> recordMatchDecision({
@@ -128,7 +128,10 @@ class _FakeAuthController extends AuthController {
   Future<void> saveProfileDetails(ProfileDetails details) async {}
 
   @override
-  Future<void> updateLocation({required double lat, required double lng}) async {}
+  Future<void> updateLocation({
+    required double lat,
+    required double lng,
+  }) async {}
 
   @override
   Future<void> reportUser({

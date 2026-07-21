@@ -75,6 +75,95 @@ class _ScoringScreenState extends State<ScoringScreen> {
     }
   }
 
+  /// Shown every time, right before a photo is actually submitted — this is
+  /// the moment the user is committing to the AI analysis, not something
+  /// to bury in a one-time onboarding step they can forget about. Returns
+  /// true only if they explicitly acknowledge it.
+  Future<bool> _confirmScoringConsent() async {
+    final colors = context.colors;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: colors.dialogBackground,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: Text(
+          'Before you submit',
+          style: TextStyle(
+            color: colors.headerPrimaryText,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'LooksMatch uses AI to analyze this photo — things like '
+                'facial symmetry, proportion, and structure — and turns '
+                'that into a private rating from 1 to 10.',
+                style: TextStyle(
+                  color: colors.headerSecondaryText,
+                  height: 1.4,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'That number is never shown to other users — it\'s used '
+                'behind the scenes to help decide who you\'re matched with.',
+                style: TextStyle(
+                  color: colors.headerSecondaryText,
+                  height: 1.4,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'This is just one input into an algorithm — it says nothing '
+                'about your worth as a person. If this feature, or dating '
+                'apps in general, ever weighs on you, please talk to '
+                'someone you trust, or reach out to a crisis line like 988 '
+                '(Suicide & Crisis Lifeline, in the US).',
+                style: TextStyle(
+                  color: colors.headerSecondaryText,
+                  height: 1.4,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text(
+              'Cancel',
+              style: TextStyle(
+                color: colors.headerSecondaryText,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text(
+              'I Understand, Continue',
+              style: TextStyle(
+                color: colors.accent,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    return confirmed == true;
+  }
+
   void _reset() {
     setState(() {
       _selectedIndex = null;
@@ -172,9 +261,9 @@ class _ScoringScreenState extends State<ScoringScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Your LooksMatch score is always calculated from one of your '
-              'actual profile photos — the score you get is what your '
-              'matches see.',
+              'Your LooksMatch score is calculated from one of your actual '
+              'profile photos. It\'s kept completely private — it\'s only '
+              'ever used behind the scenes to help find your best matches.',
               style: TextStyle(
                 color: colors.headerSecondaryText,
                 fontSize: 13,
@@ -252,9 +341,14 @@ class _ScoringScreenState extends State<ScoringScreen> {
             ElevatedButton(
               onPressed: (_selectedIndex == null || submitting)
                   ? null
-                  : () => _submit(
-                      (photos[_selectedIndex!]['storagePath'] ?? '').toString(),
-                    ),
+                  : () async {
+                      final storagePath =
+                          (photos[_selectedIndex!]['storagePath'] ?? '')
+                              .toString();
+                      final consented = await _confirmScoringConsent();
+                      if (!consented || !mounted) return;
+                      _submit(storagePath);
+                    },
               style: ElevatedButton.styleFrom(
                 backgroundColor: colors.primaryButtonBackground,
                 foregroundColor: colors.primaryButtonText,

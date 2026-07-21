@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/discover_candidate.dart';
+import '../models/profile_details.dart';
 import '../models/profile_extras.dart';
 import '../services/auth_controller.dart';
 import '../services/profile_cache.dart';
@@ -48,12 +49,8 @@ List<_StatItem> _statItems(ProfileExtras extras) {
       _StatItem(Icons.height_rounded, extras.heightLabel),
     if (extras.relationshipType != null)
       _StatItem(Icons.favorite_border_rounded, extras.relationshipType!),
-    ...extras.datingIntentions.map(
-      (intention) => _StatItem(Icons.explore_outlined, intention),
-    ),
-    ...extras.ethnicities.map(
-      (ethnicity) => _StatItem(Icons.public_rounded, ethnicity),
-    ),
+    if (extras.datingIntention != null)
+      _StatItem(Icons.explore_outlined, extras.datingIntention!),
     if (extras.educationLevel != null)
       _StatItem(Icons.school_outlined, extras.educationLevel!),
     if (extras.college?.isNotEmpty ?? false)
@@ -301,6 +298,323 @@ class _MomentCard extends StatelessWidget {
   }
 }
 
+/// The actual profile content — photo header, stat strip, compatibility
+/// card (when present), bio, hobby/food moment cards, categorized chips,
+/// and prompts. Shared between [MatchProfileScreen] (viewing someone else)
+/// and ProfileScreen's own self-preview, so "how others see your profile"
+/// and "how you see theirs" can never silently drift apart.
+class ProfileContentView extends StatelessWidget {
+  const ProfileContentView({
+    super.key,
+    required this.candidate,
+    required this.myDetails,
+  });
+
+  final DiscoverCandidate candidate;
+
+  /// Used only to highlight which of the candidate's interests/values/
+  /// music/food overlap with these — pass an empty ProfileDetails() to
+  /// suppress highlighting entirely (e.g. previewing your own profile,
+  /// where "matching yourself" isn't meaningful).
+  final ProfileDetails myDetails;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        AspectRatio(
+          aspectRatio: 4 / 5,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(24),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  _PhotoGallery(
+                    urls: candidate.photoUrls.isNotEmpty
+                        ? candidate.photoUrls
+                        : [candidate.primaryPhotoUrl],
+                  ),
+                  // IgnorePointer so this purely-informational overlay
+                  // never steals the swipe gesture from the gallery
+                  // underneath it.
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: IgnorePointer(
+                      child: Container(
+                        padding: const EdgeInsets.fromLTRB(18, 46, 18, 18),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              Colors.transparent,
+                              Colors.black.withOpacity(0.75),
+                            ],
+                          ),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                candidate.age == null
+                                    ? candidate.name
+                                    : '${candidate.name}, ${candidate.age}',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 26,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                            ),
+                            if (candidate.extras.distanceMiles != null)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 6,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.2),
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(
+                                      Icons.location_on_outlined,
+                                      size: 14,
+                                      color: Colors.white,
+                                    ),
+                                    const SizedBox(width: 3),
+                                    Text(
+                                      '${candidate.extras.distanceMiles} mi',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 14),
+        _StatStrip(colors: colors, items: _statItems(candidate.extras)),
+        if (candidate.extras.compatibilityPercent != null)
+          Container(
+            margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: colors.scoreBackground,
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(color: colors.accent.withOpacity(0.30)),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 54,
+                  height: 54,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: colors.pageBackground,
+                    border: Border.all(color: colors.accent, width: 2.5),
+                  ),
+                  child: Text(
+                    '${candidate.extras.compatibilityPercent}%',
+                    style: TextStyle(
+                      color: colors.accent,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Compatibility',
+                        style: TextStyle(
+                          color: colors.headerPrimaryText,
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Based on shared interests and what you\'re both '
+                        'looking for.',
+                        style: TextStyle(
+                          color: colors.headerSecondaryText,
+                          fontSize: 12,
+                          height: 1.35,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        if (candidate.extras.ethnicities.isNotEmpty)
+          Container(
+            margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            decoration: BoxDecoration(
+              color: colors.cardBackground,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: colors.cardBorder),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.public_rounded, size: 18, color: colors.accent),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    candidate.extras.ethnicities.join(', '),
+                    style: TextStyle(
+                      color: colors.headerPrimaryText,
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        if (candidate.extras.bio.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+            child: Text(
+              candidate.extras.bio,
+              style: TextStyle(
+                color: colors.headerPrimaryText,
+                fontSize: 15,
+                height: 1.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        if (candidate.extras.hobbyPhotoUrl != null ||
+            candidate.extras.foodPhotoUrl != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),
+            child: Row(
+              children: [
+                if (candidate.extras.hobbyPhotoUrl != null)
+                  Expanded(
+                    child: _MomentCard(
+                      colors: colors,
+                      url: candidate.extras.hobbyPhotoUrl!,
+                      icon: Icons.hiking_rounded,
+                      label: 'Hobby',
+                    ),
+                  ),
+                if (candidate.extras.hobbyPhotoUrl != null &&
+                    candidate.extras.foodPhotoUrl != null)
+                  const SizedBox(width: 12),
+                if (candidate.extras.foodPhotoUrl != null)
+                  Expanded(
+                    child: _MomentCard(
+                      colors: colors,
+                      url: candidate.extras.foodPhotoUrl!,
+                      icon: Icons.restaurant_rounded,
+                      label: 'Food',
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        _InfoCategorySection(
+          colors: colors,
+          label: 'Interests',
+          icon: Icons.star_border_rounded,
+          chips: _categoryChips(
+            candidate.extras.interests,
+            myDetails.interests,
+          ),
+        ),
+        _InfoCategorySection(
+          colors: colors,
+          label: 'Values',
+          icon: Icons.emoji_objects_outlined,
+          chips: _categoryChips(candidate.extras.values, myDetails.values),
+        ),
+        _InfoCategorySection(
+          colors: colors,
+          label: 'Music',
+          icon: Icons.music_note_rounded,
+          chips: _categoryChips(
+            candidate.extras.musicGenres,
+            myDetails.musicGenres,
+          ),
+        ),
+        _InfoCategorySection(
+          colors: colors,
+          label: 'Food',
+          icon: Icons.restaurant_outlined,
+          chips: _categoryChips(
+            candidate.extras.favoriteFoods,
+            myDetails.favoriteFoods,
+          ),
+        ),
+        ...candidate.extras.prompts.map(
+          (prompt) => Container(
+            margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: colors.cardBackground,
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(color: colors.cardBorder),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  prompt.prompt,
+                  style: TextStyle(
+                    color: colors.headerSecondaryText,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  prompt.answer,
+                  style: TextStyle(
+                    color: colors.headerPrimaryText,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class MatchProfileScreen extends StatelessWidget {
   const MatchProfileScreen({
     super.key,
@@ -351,265 +665,7 @@ class MatchProfileScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.only(bottom: 120),
         children: [
-          AspectRatio(
-            aspectRatio: 4 / 5,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(24),
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    _PhotoGallery(
-                      urls: candidate.photoUrls.isNotEmpty
-                          ? candidate.photoUrls
-                          : [candidate.primaryPhotoUrl],
-                    ),
-                    // IgnorePointer so this purely-informational overlay
-                    // never steals the swipe gesture from the gallery
-                    // underneath it.
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      child: IgnorePointer(
-                        child: Container(
-                          padding: const EdgeInsets.fromLTRB(18, 46, 18, 18),
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: [
-                                Colors.transparent,
-                                Colors.black.withOpacity(0.75),
-                              ],
-                            ),
-                          ),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  candidate.age == null
-                                      ? candidate.name
-                                      : '${candidate.name}, ${candidate.age}',
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 26,
-                                    fontWeight: FontWeight.w900,
-                                  ),
-                                ),
-                              ),
-                              if (candidate.extras.distanceMiles != null)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 6,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white.withOpacity(0.2),
-                                    borderRadius: BorderRadius.circular(999),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      const Icon(
-                                        Icons.location_on_outlined,
-                                        size: 14,
-                                        color: Colors.white,
-                                      ),
-                                      const SizedBox(width: 3),
-                                      Text(
-                                        '${candidate.extras.distanceMiles} mi',
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 14),
-          _StatStrip(colors: colors, items: _statItems(candidate.extras)),
-          if (candidate.extras.compatibilityPercent != null)
-            Container(
-              margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: colors.scoreBackground,
-                borderRadius: BorderRadius.circular(22),
-                border: Border.all(color: colors.accent.withOpacity(0.30)),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 54,
-                    height: 54,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: colors.pageBackground,
-                      border: Border.all(color: colors.accent, width: 2.5),
-                    ),
-                    child: Text(
-                      '${candidate.extras.compatibilityPercent}%',
-                      style: TextStyle(
-                        color: colors.accent,
-                        fontWeight: FontWeight.w900,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Compatibility',
-                          style: TextStyle(
-                            color: colors.headerPrimaryText,
-                            fontSize: 14.5,
-                            fontWeight: FontWeight.w900,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Based on shared interests and what you\'re both '
-                          'looking for.',
-                          style: TextStyle(
-                            color: colors.headerSecondaryText,
-                            fontSize: 12,
-                            height: 1.35,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          if (candidate.extras.bio.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-              child: Text(
-                candidate.extras.bio,
-                style: TextStyle(
-                  color: colors.headerPrimaryText,
-                  fontSize: 15,
-                  height: 1.5,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          if (candidate.extras.hobbyPhotoUrl != null ||
-              candidate.extras.foodPhotoUrl != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),
-              child: Row(
-                children: [
-                  if (candidate.extras.hobbyPhotoUrl != null)
-                    Expanded(
-                      child: _MomentCard(
-                        colors: colors,
-                        url: candidate.extras.hobbyPhotoUrl!,
-                        icon: Icons.hiking_rounded,
-                        label: 'Hobby',
-                      ),
-                    ),
-                  if (candidate.extras.hobbyPhotoUrl != null &&
-                      candidate.extras.foodPhotoUrl != null)
-                    const SizedBox(width: 12),
-                  if (candidate.extras.foodPhotoUrl != null)
-                    Expanded(
-                      child: _MomentCard(
-                        colors: colors,
-                        url: candidate.extras.foodPhotoUrl!,
-                        icon: Icons.restaurant_rounded,
-                        label: 'Food',
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          _InfoCategorySection(
-            colors: colors,
-            label: 'Interests',
-            icon: Icons.star_border_rounded,
-            chips: _categoryChips(
-              candidate.extras.interests,
-              myDetails.interests,
-            ),
-          ),
-          _InfoCategorySection(
-            colors: colors,
-            label: 'Values',
-            icon: Icons.emoji_objects_outlined,
-            chips: _categoryChips(candidate.extras.values, myDetails.values),
-          ),
-          _InfoCategorySection(
-            colors: colors,
-            label: 'Music',
-            icon: Icons.music_note_rounded,
-            chips: _categoryChips(
-              candidate.extras.musicGenres,
-              myDetails.musicGenres,
-            ),
-          ),
-          _InfoCategorySection(
-            colors: colors,
-            label: 'Food',
-            icon: Icons.restaurant_outlined,
-            chips: _categoryChips(
-              candidate.extras.favoriteFoods,
-              myDetails.favoriteFoods,
-            ),
-          ),
-          ...candidate.extras.prompts.map(
-            (prompt) => Container(
-              margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: colors.cardBackground,
-                borderRadius: BorderRadius.circular(22),
-                border: Border.all(color: colors.cardBorder),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    prompt.prompt,
-                    style: TextStyle(
-                      color: colors.headerSecondaryText,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    prompt.answer,
-                    style: TextStyle(
-                      color: colors.headerPrimaryText,
-                      fontSize: 17,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
+          ProfileContentView(candidate: candidate, myDetails: myDetails),
         ],
       ),
       bottomNavigationBar: (onConnect == null && onPass == null)

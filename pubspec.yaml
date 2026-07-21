@@ -62,6 +62,13 @@ dev_dependencies:
 # The following section is specific to Flutter packages.
 flutter:
 
+  # Project-level override, not a global `flutter config` change — this
+  # only affects this project, so it can't collide with other Flutter
+  # projects on this machine that need Swift Package Manager left off.
+  # Needed because app_settings ships only an SPM manifest, no podspec.
+  config:
+    enable-swift-package-manager: true
+
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in
   # the material Icons class.

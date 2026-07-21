@@ -88,8 +88,18 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
 
   String _formatDate(DateTime value) {
     const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     return '${months[value.month - 1]} ${value.day}, ${value.year}';
   }
@@ -127,6 +137,27 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
       final photos = await Future.wait(
         _photos.map((file) => widget.auth.uploadProfilePhoto(file)),
       );
+
+      final approvals = await Future.wait([
+        for (final photo in photos)
+          widget.auth.moderatePhoto(photo.storagePath),
+      ]);
+
+      if (approvals.any((approved) => !approved)) {
+        // The server already deleted the rejected photo(s) from Storage —
+        // drop the matching local picks so the user can choose different
+        // photos instead of being stuck resubmitting the same one.
+        setState(() {
+          for (var i = _photos.length - 1; i >= 0; i--) {
+            if (!approvals[i]) _photos.removeAt(i);
+          }
+        });
+        _showMessage(
+          'One of your photos couldn\'t be used. Please choose a different '
+          'photo and try again.',
+        );
+        return;
+      }
 
       await widget.auth.saveProfile(
         name: _nameController.text,
@@ -224,7 +255,8 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                 GridView.builder(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
-                  itemCount: _photos.length + (_photos.length < _maxPhotos ? 1 : 0),
+                  itemCount:
+                      _photos.length + (_photos.length < _maxPhotos ? 1 : 0),
                   gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: 3,
                     crossAxisSpacing: 9,
@@ -273,9 +305,8 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                       borderSide: BorderSide(color: colors.accent, width: 1.5),
                     ),
                   ),
-                  validator: (value) => (value ?? '').trim().isEmpty
-                      ? 'Enter your name'
-                      : null,
+                  validator: (value) =>
+                      (value ?? '').trim().isEmpty ? 'Enter your name' : null,
                 ),
                 const SizedBox(height: 20),
                 _sectionLabel(colors, 'Birth date'),
@@ -417,13 +448,17 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                 : colors.chipUnselectedBackground,
             borderRadius: BorderRadius.circular(999),
             border: Border.all(
-              color: selected ? colors.chipSelectedBackground : colors.chipBorder,
+              color: selected
+                  ? colors.chipSelectedBackground
+                  : colors.chipBorder,
             ),
           ),
           child: Text(
             label,
             style: TextStyle(
-              color: selected ? colors.chipSelectedText : colors.chipUnselectedText,
+              color: selected
+                  ? colors.chipSelectedText
+                  : colors.chipUnselectedText,
               fontWeight: FontWeight.w800,
               fontSize: 13,
             ),

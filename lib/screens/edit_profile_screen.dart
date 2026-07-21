@@ -66,7 +66,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   List<String> _favoriteFoods = [];
   List<String> _ethnicities = [];
   String? _relationshipType;
-  List<String> _datingIntentions = [];
+  String? _datingIntention;
   String? _drinking;
   String? _smoking;
   String? _educationLevel;
@@ -152,7 +152,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _favoriteFoods = List.of(details.favoriteFoods);
     _ethnicities = List.of(details.ethnicities);
     _relationshipType = details.relationshipType;
-    _datingIntentions = List.of(details.datingIntentions);
+    _datingIntention = details.datingIntention;
     _drinking = details.drinking;
     _smoking = details.smoking;
     _educationLevel = details.educationLevel;
@@ -475,6 +475,32 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               : widget.auth.uploadProfilePhoto(slot.file!),
         ),
       );
+
+      // Only newly uploaded photos need moderation — existing ones were
+      // already checked the first time they were uploaded.
+      final approvals = await Future.wait([
+        for (var i = 0; i < uploadedRaw.length; i++)
+          _slots[i].isExisting
+              ? Future.value(true)
+              : widget.auth.moderatePhoto(uploadedRaw[i].storagePath),
+      ]);
+
+      if (approvals.any((approved) => !approved)) {
+        // The server already deleted the rejected photo(s) from Storage —
+        // drop the matching slots so the user isn't stuck resubmitting the
+        // same photo, then let them review and save again.
+        setState(() {
+          for (var i = _slots.length - 1; i >= 0; i--) {
+            if (!approvals[i]) _slots.removeAt(i);
+          }
+        });
+        _showMessage(
+          'One of your photos couldn\'t be used. Please choose a different '
+          'photo and try again.',
+        );
+        return;
+      }
+
       // uploadProfilePhoto returns a category-less ProfilePhoto (it doesn't
       // know about tagging), and an existing slot's stored category may
       // have changed this session — apply each slot's current category
@@ -519,7 +545,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           favoriteFoods: _favoriteFoods,
           ethnicities: _ethnicities,
           relationshipType: _relationshipType,
-          datingIntentions: _datingIntentions,
+          datingIntention: _datingIntention,
           heightInches: heightInches,
           drinking: _drinking,
           smoking: _smoking,
@@ -857,18 +883,13 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   onChanged: (v) => setState(() => _relationshipType = v),
                 ),
                 const SizedBox(height: 20),
-                _multiChoiceSection(
+                _choiceSection(
                   colors: colors,
                   label: 'Dating intentions',
                   fieldKey: 'datingIntention',
-                  subtitle: 'Choose up to $_maxTraitMultiSelect.',
                   options: kDatingIntentionOptions,
-                  selected: _datingIntentions,
-                  onToggle: (v) => _toggleInList(
-                    _datingIntentions,
-                    v,
-                    max: _maxTraitMultiSelect,
-                  ),
+                  value: _datingIntention,
+                  onChanged: (v) => setState(() => _datingIntention = v),
                 ),
                 const SizedBox(height: 20),
                 _sectionHeader(colors, 'Height', 'height'),

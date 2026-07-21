@@ -88,6 +88,14 @@ abstract class AuthController extends ChangeNotifier {
 
   Future<ProfilePhoto> uploadProfilePhoto(File file);
 
+  /// Runs content moderation (nudity, etc. — see moderatePhoto in
+  /// functions/index.js) on an already-uploaded photo. Must be called for
+  /// every newly uploaded photo before it's included in the list passed to
+  /// [saveProfile] — uploadProfilePhoto itself does no moderation. Returns
+  /// false if the photo was rejected; the server deletes the Storage file
+  /// in that case, so callers don't need to separately clean it up.
+  Future<bool> moderatePhoto(String storagePath);
+
   /// Deletes a profile photo from Storage. Callers are responsible for also
   /// removing it from the photos list passed to [saveProfile] — this only
   /// cleans up the underlying file so removed photos don't linger.
@@ -365,6 +373,15 @@ class FirebaseAuthController extends AuthController {
     await reference.putFile(file);
     final url = await reference.getDownloadURL();
     return ProfilePhoto(url: url, storagePath: path);
+  }
+
+  @override
+  Future<bool> moderatePhoto(String storagePath) async {
+    final callable = _functions.httpsCallable('moderatePhoto');
+    final result = await callable.call<Map<String, dynamic>>({
+      'storagePath': storagePath,
+    });
+    return result.data['approved'] == true;
   }
 
   @override

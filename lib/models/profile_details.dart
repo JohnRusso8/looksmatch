@@ -281,7 +281,7 @@ class ProfileDetails {
     this.favoriteFoods = const [],
     this.ethnicities = const [],
     this.relationshipType,
-    this.datingIntentions = const [],
+    this.datingIntention,
     this.heightInches,
     this.drinking,
     this.smoking,
@@ -316,9 +316,9 @@ class ProfileDetails {
           : const <String>[];
     }
 
-    // ethnicity/datingIntention used to be a single string before these
-    // became multi-select — accept either shape so any already-saved
-    // single value still shows up instead of silently disappearing.
+    // ethnicity used to be a single string before it became multi-select —
+    // accept either shape so any already-saved single value still shows up
+    // instead of silently disappearing.
     List<String> parseMultiOrLegacySingle(dynamic raw) {
       if (raw is List) {
         return raw.map((i) => i.toString()).where((i) => i.isNotEmpty).toList();
@@ -327,12 +327,24 @@ class ProfileDetails {
       return const <String>[];
     }
 
+    // datingIntention briefly became multi-select and then reverted back to
+    // single-select — some already-saved profiles may still have a one-item
+    // list from that window, so accept either shape and just take the
+    // first value.
+    String? parseSingleOrLegacyList(dynamic raw) {
+      if (raw is List) {
+        return raw.isNotEmpty ? raw.first.toString() : null;
+      }
+      if (raw is String && raw.isNotEmpty) return raw;
+      return null;
+    }
+
     final interests = parseStringList(map['interests']);
     final values = parseStringList(map['values']);
     final musicGenres = parseStringList(map['musicGenres']);
     final favoriteFoods = parseStringList(map['favoriteFoods']);
     final ethnicities = parseMultiOrLegacySingle(map['ethnicity']);
-    final datingIntentions = parseMultiOrLegacySingle(map['datingIntention']);
+    final datingIntention = parseSingleOrLegacyList(map['datingIntention']);
     final preferredEthnicities = parseStringList(map['preferredEthnicities']);
     final preferredRelationshipTypes = parseStringList(
       map['preferredRelationshipTypes'],
@@ -359,7 +371,7 @@ class ProfileDetails {
       favoriteFoods: favoriteFoods,
       ethnicities: ethnicities,
       relationshipType: map['relationshipType'] as String?,
-      datingIntentions: datingIntentions,
+      datingIntention: datingIntention,
       heightInches: (map['height'] as num?)?.toInt(),
       drinking: map['drinking'] as String?,
       smoking: map['smoking'] as String?,
@@ -389,7 +401,7 @@ class ProfileDetails {
   final List<String> favoriteFoods;
   final List<String> ethnicities;
   final String? relationshipType;
-  final List<String> datingIntentions;
+  final String? datingIntention;
   final int? heightInches;
   final String? drinking;
   final String? smoking;
@@ -433,7 +445,7 @@ class ProfileDetails {
     List<String>? favoriteFoods,
     List<String>? ethnicities,
     String? relationshipType,
-    List<String>? datingIntentions,
+    String? datingIntention,
     int? heightInches,
     String? drinking,
     String? smoking,
@@ -462,7 +474,7 @@ class ProfileDetails {
       favoriteFoods: favoriteFoods ?? this.favoriteFoods,
       ethnicities: ethnicities ?? this.ethnicities,
       relationshipType: relationshipType ?? this.relationshipType,
-      datingIntentions: datingIntentions ?? this.datingIntentions,
+      datingIntention: datingIntention ?? this.datingIntention,
       heightInches: heightInches ?? this.heightInches,
       drinking: drinking ?? this.drinking,
       smoking: smoking ?? this.smoking,
@@ -496,7 +508,7 @@ class ProfileDetails {
       'favoriteFoods': favoriteFoods,
       'ethnicity': ethnicities,
       'relationshipType': relationshipType,
-      'datingIntention': datingIntentions,
+      'datingIntention': datingIntention,
       'height': heightInches,
       'drinking': drinking,
       'smoking': smoking,
