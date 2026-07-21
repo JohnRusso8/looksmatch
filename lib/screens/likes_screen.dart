@@ -33,6 +33,10 @@ class LikesScreen extends StatefulWidget {
 class _LikesScreenState extends State<LikesScreen> {
   bool _showReceived = true;
   bool _loading = true;
+  // Once we've shown real data, a tab-switch or pull-to-refresh reload
+  // fetches quietly in the background instead of wiping the list back to a
+  // full-screen spinner — only the true first load ever blocks like that.
+  bool _hasLoadedOnce = false;
   List<LikeEntry> _received = [];
   List<LikeEntry> _sent = [];
 
@@ -51,7 +55,7 @@ class _LikesScreenState extends State<LikesScreen> {
   }
 
   Future<void> _load() async {
-    setState(() => _loading = true);
+    if (!_hasLoadedOnce) setState(() => _loading = true);
 
     try {
       final result = await widget.auth.getLikes();
@@ -60,10 +64,12 @@ class _LikesScreenState extends State<LikesScreen> {
         _received = result.received;
         _sent = result.sent;
         _loading = false;
+        _hasLoadedOnce = true;
       });
     } catch (error) {
       if (!mounted) return;
       setState(() => _loading = false);
+      _hasLoadedOnce = true;
       _showMessage('Could not load likes. Pull down to retry.');
     }
   }
@@ -207,6 +213,7 @@ class _LikesScreenState extends State<LikesScreen> {
                             itemBuilder: (context, index) {
                               final entry = list[index];
                               return _LikeCard(
+                                auth: widget.auth,
                                 entry: entry,
                                 onAccept: _showReceived
                                     ? () => _respond(entry, true)
@@ -264,12 +271,14 @@ class _LikesScreenState extends State<LikesScreen> {
 
 class _LikeCard extends StatelessWidget {
   const _LikeCard({
+    required this.auth,
     required this.entry,
     this.onAccept,
     this.onDecline,
     this.onCancel,
   });
 
+  final AuthController auth;
   final LikeEntry entry;
   final VoidCallback? onAccept;
   final VoidCallback? onDecline;
@@ -295,6 +304,7 @@ class _LikeCard extends StatelessWidget {
                   context,
                   MaterialPageRoute(
                     builder: (_) => MatchProfileScreen(
+                      auth: auth,
                       candidate: DiscoverCandidate(
                         uid: entry.uid,
                         name: entry.name,

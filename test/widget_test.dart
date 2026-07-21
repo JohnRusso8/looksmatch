@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:looksmatch/models/discover_candidate.dart';
 import 'package:looksmatch/models/likes_and_matches.dart';
 import 'package:looksmatch/models/profile_details.dart';
+import 'package:looksmatch/models/review_entry.dart';
 import 'package:looksmatch/screens/auth_gate.dart';
 import 'package:looksmatch/services/auth_controller.dart';
 import 'package:looksmatch/theme/app_theme.dart';
@@ -17,18 +18,6 @@ class _FakeAuthController extends AuthController {
 
   @override
   String? get currentUserId => null;
-
-  @override
-  Future<void> createAccountWithEmail({
-    required String email,
-    required String password,
-  }) async {}
-
-  @override
-  Future<void> signInWithEmail({
-    required String email,
-    required String password,
-  }) async {}
 
   @override
   Future<PhoneVerificationSession> sendPhoneVerificationCode({
@@ -52,7 +41,7 @@ class _FakeAuthController extends AuthController {
   Future<void> signOut() async {}
 
   @override
-  Stream<bool> watchProfileCompleted() => Stream.value(false);
+  Future<void> deleteAccount() async {}
 
   @override
   Stream<Map<String, dynamic>?> watchProfile() => Stream.value(null);
@@ -72,6 +61,15 @@ class _FakeAuthController extends AuthController {
     required String interestedIn,
     required List<ProfilePhoto> photos,
   }) async {}
+
+  @override
+  Future<void> updateInterestedIn(String interestedIn) async {}
+
+  @override
+  Future<void> setAccountPaused(bool paused) async {}
+
+  @override
+  Future<void> setNotificationPrefs(Map<String, bool> prefs) async {}
 
   @override
   Future<void> submitPhotoForScoring(String storagePath) async {}
@@ -116,6 +114,13 @@ class _FakeAuthController extends AuthController {
   }) async {}
 
   @override
+  Future<void> toggleMessageReaction({
+    required String connectionId,
+    required String messageId,
+    required bool addReaction,
+  }) async {}
+
+  @override
   Stream<ProfileDetails> watchProfileDetails() =>
       Stream.value(const ProfileDetails());
 
@@ -124,6 +129,35 @@ class _FakeAuthController extends AuthController {
 
   @override
   Future<void> updateLocation({required double lat, required double lng}) async {}
+
+  @override
+  Future<void> reportUser({
+    required String reportedUid,
+    required String reason,
+    String details = '',
+  }) async {}
+
+  @override
+  Future<void> blockUser(String blockedUid) async {}
+
+  @override
+  Future<void> registerFcmToken(String token) async {}
+
+  @override
+  Future<void> unregisterFcmToken(String token) async {}
+
+  @override
+  Future<bool> checkReviewerStatus() async => false;
+
+  @override
+  Future<List<ReviewEntry>> getReviewQueue() async => [];
+
+  @override
+  Future<void> banUser({
+    required String targetUid,
+    required String action,
+    int? durationDays,
+  }) async {}
 }
 
 void main() {
@@ -143,7 +177,6 @@ void main() {
 
     expect(find.text('LooksMatch'), findsOneWidget);
     expect(find.text('Continue with Phone'), findsOneWidget);
-    expect(find.text('Continue with Email'), findsOneWidget);
     expect(find.text('Discover'), findsNothing);
   });
 }

@@ -109,10 +109,16 @@ class ChatMessageEntry {
     required this.senderId,
     required this.text,
     required this.sentAt,
+    this.heartedByUids = const [],
   });
 
   final String id;
   final String senderId;
   final String text;
   final DateTime? sentAt;
+
+  /// uids of people who double-tapped this message to heart it — either
+  /// participant can react to either side's messages, iMessage-tapback
+  /// style.
+  final List<String> heartedByUids;
 }

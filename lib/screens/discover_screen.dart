@@ -2,19 +2,23 @@ import 'package:flutter/material.dart';
 
 import '../models/discover_candidate.dart';
 import '../services/auth_controller.dart';
+import '../services/profile_cache.dart';
 import '../theme/app_theme.dart';
 import '../widgets/match_card.dart';
 import 'match_profile_screen.dart';
+import 'preferences_screen.dart';
 
 class DiscoverScreen extends StatefulWidget {
   const DiscoverScreen({
     super.key,
     required this.auth,
+    required this.profileCache,
     this.onMatched,
     this.refreshToken = 0,
   });
 
   final AuthController auth;
+  final ProfileCache profileCache;
 
   /// Called when a decision results in an immediate mutual match, so the
   /// host shell can surface the Matches tab.
@@ -31,6 +35,10 @@ class DiscoverScreen extends StatefulWidget {
 
 class _DiscoverScreenState extends State<DiscoverScreen> {
   bool _loading = true;
+  // Once we've shown real data, a tab-switch reload fetches quietly in the
+  // background instead of wiping the list back to a full-screen spinner —
+  // only the true first load ever blocks like that.
+  bool _hasLoadedOnce = false;
   List<DiscoverCandidate> _candidates = [];
   final Map<String, String> _decisions = {};
   bool _hasMore = false;
@@ -50,7 +58,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
   }
 
   Future<void> _load() async {
-    setState(() => _loading = true);
+    if (!_hasLoadedOnce) setState(() => _loading = true);
 
     try {
       final result = await widget.auth.getDailyMatches();
@@ -63,10 +71,12 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
           ..addAll(result.decisions);
         _hasMore = result.hasMore;
         _loading = false;
+        _hasLoadedOnce = true;
       });
     } catch (error) {
       if (!mounted) return;
       setState(() => _loading = false);
+      _hasLoadedOnce = true;
       _showMessage('Could not load today\'s matches. Pull down to retry.');
     }
   }
@@ -153,7 +163,19 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
         ),
         actions: [
           IconButton(
-            onPressed: () {},
+            onPressed: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => PreferencesScreen(
+                    auth: widget.auth,
+                    profileCache: widget.profileCache,
+                  ),
+                ),
+              );
+              if (!mounted) return;
+              _load();
+            },
             icon: Icon(Icons.tune_rounded, color: colors.headerIconColor),
           ),
         ],
@@ -196,6 +218,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
                   context,
                   MaterialPageRoute(
                     builder: (_) => MatchProfileScreen(
+                      auth: widget.auth,
                       candidate: candidate,
                       onConnect: () => _decide(candidate, 'liked'),
                       onPass: () => _decide(candidate, 'passed'),

@@ -5,15 +5,19 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if request.auth != null;
       allow create: if request.auth != null && request.auth.uid == userId;
-      // Owners can edit their own profile, but never the scoring status
-      // fields — those are written only by Cloud Functions via the Admin
-      // SDK, which bypasses these rules entirely. The score/band itself is
-      // never on this document at all (see scores/{userId} below) — this
-      // just stops a client from spoofing its own status.
+      // Owners can edit their own profile, but never the scoring status or
+      // account status fields — those are written only by Cloud Functions
+      // via the Admin SDK, which bypasses these rules entirely. The
+      // score/band itself is never on this document at all (see
+      // scores/{userId} below); accountStatus gates the whole app (see
+      // AccountStatusScreen) so letting a client clear its own status would
+      // let a reported/banned user just un-ban themselves.
       allow update: if request.auth != null
         && request.auth.uid == userId
         && !request.resource.data.diff(resource.data).affectedKeys()
-              .hasAny(['scoringStatus', 'scoreRejectionReason', 'scoredAt']);
+              .hasAny(['scoringStatus', 'scoreRejectionReason', 'scoredAt',
+                       'accountStatus', 'accountStatusMessage', 'accountStatusReason',
+                       'suspensionUntil', 'restrictionUntil']);
       allow delete: if false;
 
       // Cloud-Function-only: today's match allocation and the permanent
@@ -27,6 +31,35 @@ service cloud.firestore {
         allow read, write: if false;
       }
       match /receivedLikes/{likerId} {
+        allow read, write: if false;
+      }
+
+      // Reports filed against this user, keyed by reporter uid so repeat
+      // reports from the same person overwrite instead of piling up — admin
+      // (and the reportUser callable) only; the reported user must never be
+      // able to see who reported them or tamper with the count.
+      match /reports/{reporterId} {
+        allow read, write: if false;
+      }
+
+      // Who this user has blocked, and (in blockedBy) who has blocked this
+      // user — both admin-only, written via the blockUser/unblockUser
+      // callables, read only by the matching Cloud Functions so blocked
+      // people become mutually invisible without either side ever seeing
+      // the block list itself.
+      match /blocks/{blockedId} {
+        allow read, write: if false;
+      }
+      match /blockedBy/{blockerId} {
+        allow read, write: if false;
+      }
+
+      // Device push tokens, keyed by the token itself so re-registering the
+      // same device is a no-op. Admin-only — a client never needs to read
+      // its own tokens back, and no other client should ever be able to see
+      // (let alone reuse) another user's device token. Written via the
+      // registerFcmToken/unregisterFcmToken callables.
+      match /fcmTokens/{token} {
         allow read, write: if false;
       }
     }
@@ -59,6 +92,15 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Who's allowed into the moderation review queue (reviewerUids on the
+    // settings doc) — fully admin-only. A client never reads this directly;
+    // checkReviewerStatus/getReviewQueue/banUser all check it server-side.
+    // If a client could read or write this, any user could just add
+    // themselves as a reviewer.
+    match /adminConfig/{document} {
+      allow read, write: if false;
+    }
+
     // Mutual matches. Created only by Cloud Functions (createConnection),
     // never directly by a client — participants can read it (and list
     // their own matches), but the doc itself (including the lastMessage
@@ -75,7 +117,15 @@ service cloud.firestore {
           && request.auth.uid in
               get(/databases/$(database)/documents/connections/$(connectionId)).data.userIds
           && request.resource.data.senderId == request.auth.uid;
-        allow update, delete: if false;
+        // Either participant can toggle a heart reaction on either side's
+        // messages (iMessage-tapback style) — but that's the only thing
+        // this lets them touch. text/senderId/sentAt stay immutable so a
+        // message can never be edited after the fact.
+        allow update: if request.auth != null
+          && request.auth.uid in
+              get(/databases/$(database)/documents/connections/$(connectionId)).data.userIds
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['heartedByUids']);
+        allow delete: if false;
       }
     }
   }

@@ -32,6 +32,10 @@ class MatchesScreen extends StatefulWidget {
 
 class _MatchesScreenState extends State<MatchesScreen> {
   bool _loading = true;
+  // Once we've shown real data, a tab-switch or pull-to-refresh reload
+  // fetches quietly in the background instead of wiping the list back to a
+  // full-screen spinner — only the true first load ever blocks like that.
+  bool _hasLoadedOnce = false;
   List<MatchConnection> _matches = [];
 
   @override
@@ -49,7 +53,7 @@ class _MatchesScreenState extends State<MatchesScreen> {
   }
 
   Future<void> _load() async {
-    setState(() => _loading = true);
+    if (!_hasLoadedOnce) setState(() => _loading = true);
 
     try {
       final matches = await widget.auth.getMatches();
@@ -57,10 +61,12 @@ class _MatchesScreenState extends State<MatchesScreen> {
       setState(() {
         _matches = matches;
         _loading = false;
+        _hasLoadedOnce = true;
       });
     } catch (error) {
       if (!mounted) return;
       setState(() => _loading = false);
+      _hasLoadedOnce = true;
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(

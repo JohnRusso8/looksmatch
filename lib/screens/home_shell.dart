@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../services/auth_controller.dart';
+import '../services/notification_router.dart';
+import '../services/profile_cache.dart';
 import '../theme/app_theme.dart';
 import 'discover_screen.dart';
 import 'likes_screen.dart';
@@ -21,6 +23,11 @@ class _HomeShellState extends State<HomeShell> {
   int _discoverRefreshToken = 0;
   int _likesRefreshToken = 0;
   int _matchesRefreshToken = 0;
+
+  // Lives for the whole signed-in session (same lifetime as this shell) so
+  // Profile/Settings/Preferences/Edit Profile/Scoring can all read the
+  // user's own profile instantly instead of each re-fetching it.
+  late final ProfileCache _profileCache = ProfileCache(widget.auth);
 
   // IndexedStack keeps every tab's State alive for the whole session, so
   // each tab's initState only ever runs once — switching back to a tab
@@ -50,12 +57,45 @@ class _HomeShellState extends State<HomeShell> {
   void _goToMatches() => _selectTab(2);
 
   @override
+  void initState() {
+    super.initState();
+    // Listener, not just a one-time check — a notification tapped while
+    // terminated resolves asynchronously (getInitialMessage) and may set
+    // this after HomeShell has already mounted, so the listener has to stay
+    // registered rather than only checking once here. The initial check
+    // itself is deferred a frame since _selectTab calls setState, which
+    // initState can't do synchronously.
+    NotificationRouter.pendingTab.addListener(_onNotificationTabRequest);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _onNotificationTabRequest());
+  }
+
+  void _onNotificationTabRequest() {
+    final tab = NotificationRouter.pendingTab.value;
+    if (tab == null) return;
+    NotificationRouter.consume();
+
+    if (tab == 'matches') {
+      _selectTab(2);
+    } else if (tab == 'likes') {
+      _selectTab(1);
+    }
+  }
+
+  @override
+  void dispose() {
+    NotificationRouter.pendingTab.removeListener(_onNotificationTabRequest);
+    _profileCache.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final colors = context.colors;
 
     final tabs = [
       DiscoverScreen(
         auth: widget.auth,
+        profileCache: _profileCache,
         onMatched: _goToMatches,
         refreshToken: _discoverRefreshToken,
       ),
@@ -65,7 +105,7 @@ class _HomeShellState extends State<HomeShell> {
         refreshToken: _likesRefreshToken,
       ),
       MatchesScreen(auth: widget.auth, refreshToken: _matchesRefreshToken),
-      ProfileScreen(auth: widget.auth),
+      ProfileScreen(auth: widget.auth, profileCache: _profileCache),
     ];
 
     return Scaffold(

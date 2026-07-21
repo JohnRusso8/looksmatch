@@ -4,6 +4,8 @@ const {defineSecret} = require('firebase-functions/params');
 const {initializeApp} = require('firebase-admin/app');
 const {getFirestore, FieldValue} = require('firebase-admin/firestore');
 const {getStorage} = require('firebase-admin/storage');
+const {getAuth} = require('firebase-admin/auth');
+const {getMessaging} = require('firebase-admin/messaging');
 const {GoogleGenerativeAI} = require('@google/generative-ai');
 const {
   RekognitionClient,
@@ -395,6 +397,9 @@ const DISPLAYABLE_PROFILE_FIELDS = [
   'bio',
   'prompts',
   'interests',
+  'values',
+  'musicGenres',
+  'favoriteFoods',
   'ethnicity',
   'relationshipType',
   'datingIntention',
@@ -408,17 +413,27 @@ const DISPLAYABLE_PROFILE_FIELDS = [
 // Simple exact-match weights for the compatibility score — deliberately
 // excludes ethnicity (same anti-bias reasoning as keeping race out of the
 // looks score entirely) and anything that isn't really a "compatibility"
-// signal (height, college, bio). Interests are scored separately below
-// since they're a set, not a single value.
+// signal (height, college, bio). Multi-select fields (interests, values,
+// music, food) are scored separately below since they're sets, not single
+// values. The two groups are weighted 40/60 — shared lifestyle/taste
+// outweighs a handful of single-answer questions.
 const COMPATIBILITY_MATCH_WEIGHTS = {
-  datingIntention: 20,
-  relationshipType: 15,
-  drinking: 10,
-  smoking: 10,
+  datingIntention: 15,
+  relationshipType: 10,
+  drinking: 5,
+  smoking: 5,
   educationLevel: 5,
 };
-const COMPATIBILITY_INTERESTS_MAX_POINTS = 40;
-const COMPATIBILITY_INTERESTS_CAP = 5;
+
+// Each multi-select category contributes up to maxPoints, reached once
+// `cap` items are shared — further overlap beyond the cap doesn't add more,
+// so one person listing 20 interests can't dominate the score.
+const COMPATIBILITY_OVERLAP_CATEGORIES = {
+  interests: {maxPoints: 15, cap: 4},
+  values: {maxPoints: 15, cap: 4},
+  musicGenres: {maxPoints: 15, cap: 4},
+  favoriteFoods: {maxPoints: 15, cap: 4},
+};
 
 function fieldMutuallyVisible(a, b, field) {
   return (a?.fieldVisibility || {})[field] !== false && (b?.fieldVisibility || {})[field] !== false;
@@ -443,17 +458,15 @@ function computeCompatibility(myDetails, theirDetails) {
     if (mine === theirs) points += weight;
   }
 
-  if (fieldMutuallyVisible(myDetails, theirDetails, 'interests')) {
-    const mine = Array.isArray(myDetails.interests) ? myDetails.interests : [];
-    const theirs = Array.isArray(theirDetails.interests) ? theirDetails.interests : [];
-    if (mine.length > 0 && theirs.length > 0) {
-      consideredAny = true;
-      const theirSet = new Set(theirs);
-      const shared = mine.filter((interest) => theirSet.has(interest)).length;
-      points +=
-        Math.min(shared, COMPATIBILITY_INTERESTS_CAP) *
-        (COMPATIBILITY_INTERESTS_MAX_POINTS / COMPATIBILITY_INTERESTS_CAP);
-    }
+  for (const [field, {maxPoints, cap}] of Object.entries(COMPATIBILITY_OVERLAP_CATEGORIES)) {
+    if (!fieldMutuallyVisible(myDetails, theirDetails, field)) continue;
+    const mine = Array.isArray(myDetails[field]) ? myDetails[field] : [];
+    const theirs = Array.isArray(theirDetails[field]) ? theirDetails[field] : [];
+    if (mine.length === 0 || theirs.length === 0) continue;
+    consideredAny = true;
+    const theirSet = new Set(theirs);
+    const shared = mine.filter((item) => theirSet.has(item)).length;
+    points += Math.min(shared, cap) * (maxPoints / cap);
   }
 
   // Nothing comparable was set/visible on either side — show no score
@@ -481,6 +494,150 @@ function hasValue(value) {
   if (Array.isArray(value)) return value.length > 0;
   if (typeof value === 'string') return value.trim().length > 0;
   return true;
+}
+
+// A field the candidate has hidden is treated as unknown for preference
+// filtering too, not just for display — same "hidden means hidden
+// everywhere" rule enrichSummaries uses for compatibility, so a hidden
+// choice can never be silently used to include or exclude someone.
+function candidateFieldIfVisible(details, field) {
+  if (!details) return undefined;
+  if ((details.fieldVisibility || {})[field] === false) return undefined;
+  return details[field];
+}
+
+// No preference set, or the candidate's value is unknown (unset/hidden) —
+// either way, don't exclude. Only an explicit preference list AND a known,
+// non-matching candidate value excludes.
+function matchesListPreference(preferred, candidateValue) {
+  if (!hasValue(preferred)) return true;
+  if (candidateValue === undefined || candidateValue === null) return true;
+  return preferred.includes(candidateValue);
+}
+
+function matchesTraitPreferences(myDetails, candidateDetails) {
+  if (
+    !matchesListPreference(
+      myDetails?.preferredEthnicities,
+      candidateFieldIfVisible(candidateDetails, 'ethnicity'),
+    )
+  ) {
+    return false;
+  }
+  if (
+    !matchesListPreference(
+      myDetails?.preferredRelationshipTypes,
+      candidateFieldIfVisible(candidateDetails, 'relationshipType'),
+    )
+  ) {
+    return false;
+  }
+  if (
+    !matchesListPreference(
+      myDetails?.preferredFamilyPlans,
+      candidateFieldIfVisible(candidateDetails, 'familyPlans'),
+    )
+  ) {
+    return false;
+  }
+  if (
+    !matchesListPreference(
+      myDetails?.preferredEducationLevels,
+      candidateFieldIfVisible(candidateDetails, 'educationLevel'),
+    )
+  ) {
+    return false;
+  }
+
+  const height = candidateFieldIfVisible(candidateDetails, 'height');
+  if (typeof height === 'number') {
+    if (myDetails?.minHeightInches != null && height < myDetails.minHeightInches) {
+      return false;
+    }
+    if (myDetails?.maxHeightInches != null && height > myDetails.maxHeightInches) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+// Union of who this user has blocked and who has blocked this user — both
+// directions are mutually invisible. blockedBy is maintained by the other
+// person's blockUser/unblockUser call specifically so this never needs a
+// collection-group query across every user's blocks subcollection.
+async function getBlockedUids(db, uid) {
+  const [blocksSnap, blockedBySnap] = await Promise.all([
+    db.collection('users').doc(uid).collection('blocks').get(),
+    db.collection('users').doc(uid).collection('blockedBy').get(),
+  ]);
+
+  return new Set([
+    ...blocksSnap.docs.map((doc) => doc.id),
+    ...blockedBySnap.docs.map((doc) => doc.id),
+  ]);
+}
+
+// FCM error codes that mean a token is permanently dead (app uninstalled,
+// reinstalled with a new token, etc.) — anything else (rate limits,
+// transient network errors) is left alone so a blip doesn't wipe out a
+// perfectly good token.
+const DEAD_TOKEN_ERROR_CODES = new Set([
+  'messaging/invalid-registration-token',
+  'messaging/registration-token-not-registered',
+]);
+
+// category must match a key in notificationPrefs (see the Settings
+// screen) — 'like' | 'match' | 'message'. Missing prefs (a user who's
+// never touched notification settings) default to enabled, so this only
+// ever narrows delivery for someone who explicitly muted that category.
+const NOTIFICATION_CATEGORIES = new Set(['like', 'match', 'message']);
+
+// Sends the same notification to every device this user has registered,
+// pruning any token FCM reports as dead so the token list self-cleans
+// instead of growing forever. Never throws — a failed push shouldn't ever
+// fail the like/match/message action that triggered it.
+async function sendPushToUser(db, uid, {title, body, data, category}) {
+  try {
+    if (category && NOTIFICATION_CATEGORIES.has(category)) {
+      const userSnap = await db.collection('users').doc(uid).get();
+      const prefs = userSnap.data()?.notificationPrefs || {};
+      if (prefs[category] === false) return;
+    }
+
+    const tokensSnap = await db.collection('users').doc(uid).collection('fcmTokens').get();
+    if (tokensSnap.empty) return;
+
+    const tokens = tokensSnap.docs.map((doc) => doc.id);
+    const stringData = Object.fromEntries(
+      Object.entries(data || {}).map(([key, value]) => [key, String(value)]),
+    );
+
+    const response = await getMessaging().sendEachForMulticast({
+      tokens,
+      notification: {title, body},
+      data: stringData,
+      apns: {payload: {aps: {sound: 'default'}}},
+      android: {notification: {sound: 'default'}},
+    });
+
+    const deadTokens = [];
+    response.responses.forEach((result, index) => {
+      if (!result.success && DEAD_TOKEN_ERROR_CODES.has(result.error?.code)) {
+        deadTokens.push(tokens[index]);
+      }
+    });
+
+    if (deadTokens.length > 0) {
+      await Promise.all(
+        deadTokens.map((token) =>
+          db.collection('users').doc(uid).collection('fcmTokens').doc(token).delete(),
+        ),
+      );
+    }
+  } catch (error) {
+    console.log(`Could not send push to ${uid}: ${error.message}`);
+  }
 }
 
 // Adds each person's own bio/prompts/traits (respecting their individual
@@ -549,6 +706,28 @@ async function createConnection(db, uidA, uidB) {
       lastMessage: '',
       lastMessageAt: FieldValue.serverTimestamp(),
     });
+
+    const [aDoc, bDoc] = await Promise.all([
+      db.collection('users').doc(uidA).get(),
+      db.collection('users').doc(uidB).get(),
+    ]);
+    const aName = (aDoc.data()?.name || 'Someone').toString();
+    const bName = (bDoc.data()?.name || 'Someone').toString();
+
+    await Promise.all([
+      sendPushToUser(db, uidA, {
+        title: 'It\'s a match!',
+        body: `You and ${bName} liked each other.`,
+        data: {type: 'match', connectionId},
+        category: 'match',
+      }),
+      sendPushToUser(db, uidB, {
+        title: 'It\'s a match!',
+        body: `You and ${aName} liked each other.`,
+        data: {type: 'match', connectionId},
+        category: 'match',
+      }),
+    ]);
   }
 
   // Nothing left to accept/decline/cancel once matched.
@@ -633,12 +812,12 @@ exports.getDailyMatches = onCall({region: 'us-central1'}, async (request) => {
   const myGender = (me.gender || '').toString();
   const myInterestedIn = (me.interestedIn || '').toString();
 
-  const interactionsSnap = await db
-    .collection('users')
-    .doc(uid)
-    .collection('interactions')
-    .get();
+  const [interactionsSnap, blockedUids] = await Promise.all([
+    db.collection('users').doc(uid).collection('interactions').get(),
+    getBlockedUids(db, uid),
+  ]);
   const excludedUids = new Set(interactionsSnap.docs.map((doc) => doc.id));
+  blockedUids.forEach((blockedUid) => excludedUids.add(blockedUid));
   excludedUids.add(uid);
 
   const candidatesSnap = await db
@@ -652,6 +831,11 @@ exports.getDailyMatches = onCall({region: 'us-central1'}, async (request) => {
 
     const data = doc.data();
     if (data.scoringStatus !== 'scored') return false;
+    // Paused is self-service (Settings screen) and distinct from
+    // accountStatus (reviewer-only moderation) — a paused user keeps full
+    // access to their existing matches/messages, they just stop being
+    // surfaced to new people.
+    if (data.paused === true) return false;
 
     return isMutuallyInterested(
       myGender,
@@ -703,14 +887,39 @@ exports.getDailyMatches = onCall({region: 'us-central1'}, async (request) => {
     }
   }
 
+  // Ethnicity/height/relationship-type/children/education-level preferences
+  // (see PreferencesScreen) — same hard-filter, permissive-on-missing-data
+  // treatment as age range and distance above. Only fetches profileDetails
+  // for whoever's left after the cheaper filters already ran.
+  let preferenceFiltered = distanceFiltered;
+  const hasTraitPreferences =
+    hasValue(myDetails?.preferredEthnicities) ||
+    hasValue(myDetails?.preferredRelationshipTypes) ||
+    hasValue(myDetails?.preferredFamilyPlans) ||
+    hasValue(myDetails?.preferredEducationLevels) ||
+    myDetails?.minHeightInches != null ||
+    myDetails?.maxHeightInches != null;
+
+  if (hasTraitPreferences) {
+    const candidateDetailDocs = await Promise.all(
+      distanceFiltered.map((doc) => db.collection('profileDetails').doc(doc.id).get()),
+    );
+    preferenceFiltered = distanceFiltered.filter((doc, index) => {
+      const details = candidateDetailDocs[index].exists
+        ? candidateDetailDocs[index].data()
+        : null;
+      return matchesTraitPreferences(myDetails, details);
+    });
+  }
+
   const myScoreSnap = await db.collection('scores').doc(uid).get();
   const myRawScore = myScoreSnap.data()?.rawScore ?? null;
 
   const scoreDocs = await Promise.all(
-    distanceFiltered.map((doc) => db.collection('scores').doc(doc.id).get()),
+    preferenceFiltered.map((doc) => db.collection('scores').doc(doc.id).get()),
   );
 
-  const ranked = distanceFiltered
+  const ranked = preferenceFiltered
     .map((doc, index) => ({
       uid: doc.id,
       rawScore: scoreDocs[index].data()?.rawScore ?? null,
@@ -809,6 +1018,15 @@ exports.recordMatchDecision = onCall({region: 'us-central1'}, async (request) =>
       .collection('receivedLikes')
       .doc(uid)
       .set({likedAt: FieldValue.serverTimestamp()});
+
+    const myDoc = await db.collection('users').doc(uid).get();
+    const myName = (myDoc.data()?.name || 'Someone').toString();
+    await sendPushToUser(db, candidateUid, {
+      title: 'New like',
+      body: `${myName} likes you!`,
+      data: {type: 'like'},
+      category: 'like',
+    });
   }
 
   return {status: 'ok'};
@@ -822,7 +1040,7 @@ exports.getLikes = onCall({region: 'us-central1'}, async (request) => {
 
   const db = getFirestore();
 
-  const [receivedSnap, sentInteractionsSnap] = await Promise.all([
+  const [receivedSnap, sentInteractionsSnap, blockedUids] = await Promise.all([
     db.collection('users').doc(uid).collection('receivedLikes').get(),
     db
       .collection('users')
@@ -830,9 +1048,13 @@ exports.getLikes = onCall({region: 'us-central1'}, async (request) => {
       .collection('interactions')
       .where('decision', '==', 'liked')
       .get(),
+    getBlockedUids(db, uid),
   ]);
 
-  const sentCandidateUids = sentInteractionsSnap.docs.map((doc) => doc.id);
+  const sentCandidateUids = sentInteractionsSnap.docs
+    .map((doc) => doc.id)
+    .filter((candidateUid) => !blockedUids.has(candidateUid));
+  const receivedEntryDocs = receivedSnap.docs.filter((doc) => !blockedUids.has(doc.id));
 
   // interactions docs are permanent decision records — they don't get
   // cleaned up once a like is resolved, unlike receivedLikes. So a "sent"
@@ -856,7 +1078,7 @@ exports.getLikes = onCall({region: 'us-central1'}, async (request) => {
       ),
     ),
     Promise.all(
-      receivedSnap.docs.map((doc) => db.collection('users').doc(doc.id).get()),
+      receivedEntryDocs.map((doc) => db.collection('users').doc(doc.id).get()),
     ),
   ]);
 
@@ -871,7 +1093,7 @@ exports.getLikes = onCall({region: 'us-central1'}, async (request) => {
   );
 
   const received = receivedDocs
-    .map((doc, index) => ({doc, likedAt: receivedSnap.docs[index].data().likedAt}))
+    .map((doc, index) => ({doc, likedAt: receivedEntryDocs[index].data().likedAt}))
     .filter((entry) => entry.doc.exists)
     .map((entry) => ({
       ...summarizeUserDoc(entry.doc),
@@ -978,16 +1200,16 @@ exports.getMatches = onCall({region: 'us-central1'}, async (request) => {
   }
 
   const db = getFirestore();
-  const connectionsSnap = await db
-    .collection('connections')
-    .where('userIds', 'array-contains', uid)
-    .get();
+  const [connectionsSnap, blockedUids] = await Promise.all([
+    db.collection('connections').where('userIds', 'array-contains', uid).get(),
+    getBlockedUids(db, uid),
+  ]);
 
   const matches = await Promise.all(
     connectionsSnap.docs.map(async (doc) => {
       const data = doc.data();
       const otherUid = (data.userIds || []).find((id) => id !== uid);
-      if (!otherUid) return null;
+      if (!otherUid || blockedUids.has(otherUid)) return null;
 
       const otherDoc = await db.collection('users').doc(otherUid).get();
       if (!otherDoc.exists) return null;
@@ -1041,6 +1263,360 @@ exports.updateLocation = onCall({region: 'us-central1'}, async (request) => {
   return {status: 'ok'};
 });
 
+// Keyed by the token itself, so re-registering the same device on every
+// app launch is just a harmless overwrite rather than an ever-growing list.
+exports.registerFcmToken = onCall({region: 'us-central1'}, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) {
+    throw new HttpsError('unauthenticated', 'Sign in required.');
+  }
+
+  const token = request.data?.token;
+  if (typeof token !== 'string' || token.length === 0) {
+    throw new HttpsError('invalid-argument', 'Missing token.');
+  }
+
+  await getFirestore()
+    .collection('users')
+    .doc(uid)
+    .collection('fcmTokens')
+    .doc(token)
+    .set({updatedAt: FieldValue.serverTimestamp()});
+
+  return {status: 'ok'};
+});
+
+// Called on sign-out so a shared/reused device stops receiving this
+// account's pushes once someone else signs in on it.
+exports.unregisterFcmToken = onCall({region: 'us-central1'}, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) {
+    throw new HttpsError('unauthenticated', 'Sign in required.');
+  }
+
+  const token = request.data?.token;
+  if (typeof token !== 'string' || token.length === 0) {
+    throw new HttpsError('invalid-argument', 'Missing token.');
+  }
+
+  await getFirestore()
+    .collection('users')
+    .doc(uid)
+    .collection('fcmTokens')
+    .doc(token)
+    .delete();
+
+  return {status: 'ok'};
+});
+
+// Whether uid is allowed into the moderation review queue — checked
+// server-side for every review action so a client can never spoof its way
+// into reviewer-only capabilities. adminConfig is fully locked down (see
+// firestore.rules) — this is the only way to read it.
+async function isReviewer(db, uid) {
+  const settingsSnap = await db.collection('adminConfig').doc('settings').get();
+  const reviewerUids = settingsSnap.data()?.reviewerUids || [];
+  return reviewerUids.includes(uid);
+}
+
+exports.checkReviewerStatus = onCall({region: 'us-central1'}, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) {
+    throw new HttpsError('unauthenticated', 'Sign in required.');
+  }
+
+  return {isReviewer: await isReviewer(getFirestore(), uid)};
+});
+
+// Every account currently flagged in any way — under_review from
+// auto-flagging, or already suspended/banned, included too so a reviewer
+// can revisit or undo a past decision — with a summary of the reports
+// filed against them. Reporter identity is deliberately left out of what's
+// returned; a reason/details/count is enough to judge whether action is
+// warranted without exposing who filed a report.
+exports.getReviewQueue = onCall({region: 'us-central1'}, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) {
+    throw new HttpsError('unauthenticated', 'Sign in required.');
+  }
+
+  const db = getFirestore();
+  if (!(await isReviewer(db, uid))) {
+    throw new HttpsError('permission-denied', 'Not authorized.');
+  }
+
+  const flaggedSnap = await db
+    .collection('users')
+    .where('accountStatus', 'in', ['under_review', 'restricted', 'suspended', 'banned'])
+    .get();
+
+  const entries = await Promise.all(
+    flaggedSnap.docs.map(async (doc) => {
+      const data = doc.data();
+      const photos = Array.isArray(data.photos) ? data.photos : [];
+      const reportsSnap = await db.collection('users').doc(doc.id).collection('reports').get();
+
+      return {
+        uid: doc.id,
+        name: (data.name || '').toString(),
+        age: calculateAge(data.birthDate),
+        primaryPhotoUrl: photos.length > 0 ? (photos[0].url || '').toString() : '',
+        accountStatus: (data.accountStatus || '').toString(),
+        accountStatusMessage: (data.accountStatusMessage || '').toString(),
+        accountStatusReason: (data.accountStatusReason || '').toString(),
+        suspensionUntil: data.suspensionUntil?.toDate?.().toISOString() ?? null,
+        reportCount: reportsSnap.size,
+        reports: reportsSnap.docs.map((reportDoc) => ({
+          reason: (reportDoc.data().reason || '').toString(),
+          details: (reportDoc.data().details || '').toString(),
+          createdAt: reportDoc.data().createdAt?.toDate?.().toISOString() ?? null,
+        })),
+      };
+    }),
+  );
+
+  return {entries};
+});
+
+const BAN_ACTIONS = new Set(['permanent', 'temporary', 'clear']);
+
+// permanent -> banned for good. temporary -> suspended until now+durationDays.
+// clear -> restores access, e.g. when a report turns out to be unfounded.
+exports.banUser = onCall({region: 'us-central1'}, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) {
+    throw new HttpsError('unauthenticated', 'Sign in required.');
+  }
+
+  const db = getFirestore();
+  if (!(await isReviewer(db, uid))) {
+    throw new HttpsError('permission-denied', 'Not authorized.');
+  }
+
+  const targetUid = request.data?.targetUid;
+  const action = request.data?.action;
+  const durationDays = request.data?.durationDays;
+
+  if (typeof targetUid !== 'string' || targetUid.length === 0) {
+    throw new HttpsError('invalid-argument', 'Missing targetUid.');
+  }
+  if (!BAN_ACTIONS.has(action)) {
+    throw new HttpsError('invalid-argument', 'Invalid action.');
+  }
+
+  const targetRef = db.collection('users').doc(targetUid);
+
+  if (action === 'clear') {
+    await targetRef.update({
+      accountStatus: FieldValue.delete(),
+      accountStatusMessage: FieldValue.delete(),
+      accountStatusReason: FieldValue.delete(),
+      suspensionUntil: FieldValue.delete(),
+      restrictionUntil: FieldValue.delete(),
+    });
+    return {status: 'ok'};
+  }
+
+  if (action === 'permanent') {
+    await targetRef.update({
+      accountStatus: 'banned',
+      accountStatusMessage: 'Your account has been permanently banned from LooksMatch.',
+      accountStatusReason: 'Violation of community guidelines',
+      suspensionUntil: FieldValue.delete(),
+      restrictionUntil: FieldValue.delete(),
+    });
+    return {status: 'ok'};
+  }
+
+  if (typeof durationDays !== 'number' || durationDays <= 0) {
+    throw new HttpsError('invalid-argument', 'Missing or invalid durationDays.');
+  }
+
+  const suspensionUntil = new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000);
+  await targetRef.update({
+    accountStatus: 'suspended',
+    accountStatusMessage: `Your account is suspended until ${suspensionUntil.toDateString()}.`,
+    accountStatusReason: 'Violation of community guidelines',
+    suspensionUntil,
+    restrictionUntil: FieldValue.delete(),
+  });
+
+  return {status: 'ok'};
+});
+
+const REPORT_REASONS = new Set([
+  'Inappropriate photos',
+  'Harassment or abuse',
+  'Fake profile',
+  'Spam or scam',
+  'Underage user',
+  'Other',
+]);
+const REPORT_AUTO_REVIEW_THRESHOLD = 5;
+const REPORT_DETAILS_MAX_LENGTH = 500;
+
+// Reports are keyed by reporter uid, not auto-incrementing — repeat reports
+// from the same person overwrite their existing report rather than piling
+// up, so the threshold below always means reports from 5 distinct people,
+// not 5 taps from one person trying to force a ban.
+exports.reportUser = onCall({region: 'us-central1'}, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) {
+    throw new HttpsError('unauthenticated', 'Sign in required.');
+  }
+
+  const reportedUid = request.data?.reportedUid;
+  const reason = request.data?.reason;
+  const details = (request.data?.details || '').toString().trim().slice(0, REPORT_DETAILS_MAX_LENGTH);
+
+  if (typeof reportedUid !== 'string' || reportedUid.length === 0) {
+    throw new HttpsError('invalid-argument', 'Missing reportedUid.');
+  }
+  if (reportedUid === uid) {
+    throw new HttpsError('invalid-argument', 'You can\'t report yourself.');
+  }
+  if (typeof reason !== 'string' || !REPORT_REASONS.has(reason)) {
+    throw new HttpsError('invalid-argument', 'Invalid reason.');
+  }
+
+  const db = getFirestore();
+  const reportsRef = db.collection('users').doc(reportedUid).collection('reports');
+
+  await reportsRef.doc(uid).set({
+    reason,
+    details,
+    createdAt: FieldValue.serverTimestamp(),
+  });
+
+  const reportsSnap = await reportsRef.get();
+
+  if (reportsSnap.size >= REPORT_AUTO_REVIEW_THRESHOLD) {
+    const targetSnap = await db.collection('users').doc(reportedUid).get();
+
+    // Don't stomp a status an admin may have already set manually (e.g.
+    // upgraded straight to 'banned') just because more reports rolled in.
+    if (!targetSnap.data()?.accountStatus) {
+      await db.collection('users').doc(reportedUid).update({
+        accountStatus: 'under_review',
+        accountStatusMessage:
+          'Your account has been reported multiple times and is under review by our team.',
+        accountStatusReason: 'Multiple user reports',
+      });
+    }
+  }
+
+  return {status: 'ok'};
+});
+
+// Blocking writes both directions — blocks/{blockedUid} under the blocker
+// (their own list, theirs to undo) and blockedBy/{blockerUid} under the
+// blocked person (a read-only signal used purely to filter that person's
+// own candidate/like/match queries). This keeps both people mutually
+// invisible without ever needing a collection-group query across every
+// user's blocks subcollection to answer "who has blocked me?".
+exports.blockUser = onCall({region: 'us-central1'}, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) {
+    throw new HttpsError('unauthenticated', 'Sign in required.');
+  }
+
+  const blockedUid = request.data?.blockedUid;
+  if (typeof blockedUid !== 'string' || blockedUid.length === 0) {
+    throw new HttpsError('invalid-argument', 'Missing blockedUid.');
+  }
+  if (blockedUid === uid) {
+    throw new HttpsError('invalid-argument', 'You can\'t block yourself.');
+  }
+
+  const db = getFirestore();
+  const createdAt = FieldValue.serverTimestamp();
+
+  await Promise.all([
+    db.collection('users').doc(uid).collection('blocks').doc(blockedUid).set({createdAt}),
+    db.collection('users').doc(blockedUid).collection('blockedBy').doc(uid).set({createdAt}),
+  ]);
+
+  return {status: 'ok'};
+});
+
+exports.unblockUser = onCall({region: 'us-central1'}, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) {
+    throw new HttpsError('unauthenticated', 'Sign in required.');
+  }
+
+  const blockedUid = request.data?.blockedUid;
+  if (typeof blockedUid !== 'string' || blockedUid.length === 0) {
+    throw new HttpsError('invalid-argument', 'Missing blockedUid.');
+  }
+
+  const db = getFirestore();
+
+  await Promise.all([
+    db.collection('users').doc(uid).collection('blocks').doc(blockedUid).delete(),
+    db.collection('users').doc(blockedUid).collection('blockedBy').doc(uid).delete(),
+  ]);
+
+  return {status: 'ok'};
+});
+
+// Permanently deletes everything tied to this account: the users/{uid} doc
+// and all of its subcollections (dailyMatches, interactions, receivedLikes,
+// reports filed against them, blocks, blockedBy), scores/profileDetails/
+// locations, every connection they're part of (and its messages), their
+// uploaded photos in Storage, and finally the Firebase Auth user itself.
+//
+// Deliberately does NOT scrub this uid out of *other* users' interactions/
+// receivedLikes/blocks subcollections — every read path that resolves a
+// referenced uid back to a users/{uid} doc already filters on doc.exists
+// (see buildDailyMatchesResponse, getLikes, getMatches), so once
+// users/{uid} is gone a deleted account silently disappears from everyone
+// else's results without needing a separate collection-group cleanup pass.
+//
+// Runs entirely via the Admin SDK, which is why this doesn't need the
+// "recent login" re-authentication the client Firebase Auth SDK would
+// otherwise require for self-deletion — a valid ID token is enough.
+exports.deleteAccount = onCall({region: 'us-central1'}, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) {
+    throw new HttpsError('unauthenticated', 'Sign in required.');
+  }
+
+  const db = getFirestore();
+
+  const connectionsSnap = await db
+    .collection('connections')
+    .where('userIds', 'array-contains', uid)
+    .get();
+
+  await Promise.all(
+    connectionsSnap.docs.map((doc) => db.recursiveDelete(doc.ref)),
+  );
+
+  await db.recursiveDelete(db.collection('users').doc(uid));
+
+  await Promise.all([
+    db.collection('scores').doc(uid).delete(),
+    db.collection('profileDetails').doc(uid).delete(),
+    db.collection('locations').doc(uid).delete(),
+  ]);
+
+  try {
+    await getStorage().bucket().deleteFiles({prefix: `profile_photos/${uid}/`});
+  } catch (error) {
+    // No photos ever uploaded, or already gone — not fatal, keep going so
+    // the account still gets deleted.
+    console.log(`No profile photos to delete for ${uid}: ${error.message}`);
+  }
+
+  // Deleted last — if anything above throws, the user can still sign in
+  // and retry rather than being locked out with a half-cleaned-up account
+  // nobody (including them) can act on anymore.
+  await getAuth().deleteUser(uid);
+
+  return {status: 'ok'};
+});
+
 // Keeps connections/{id}.lastMessage in sync server-side so clients never
 // need write access to the connection doc itself — just send a message and
 // this trigger updates the preview shown on the Matches list.
@@ -1054,15 +1630,31 @@ exports.onMessageCreated = onDocumentCreated(
     if (!message) return;
 
     const db = getFirestore();
-    await db
-      .collection('connections')
-      .doc(event.params.connectionId)
-      .set(
+    const connectionRef = db.collection('connections').doc(event.params.connectionId);
+
+    const [connectionSnap] = await Promise.all([
+      connectionRef.get(),
+      connectionRef.set(
         {
           lastMessage: (message.text || '').toString(),
           lastMessageAt: message.sentAt || FieldValue.serverTimestamp(),
         },
         {merge: true},
-      );
+      ),
+    ]);
+
+    const senderId = (message.senderId || '').toString();
+    const recipientId = (connectionSnap.data()?.userIds || []).find((id) => id !== senderId);
+    if (!recipientId) return;
+
+    const senderDoc = await db.collection('users').doc(senderId).get();
+    const senderName = (senderDoc.data()?.name || 'Someone').toString();
+
+    await sendPushToUser(db, recipientId, {
+      title: senderName,
+      body: (message.text || '').toString(),
+      data: {type: 'message', connectionId: event.params.connectionId},
+      category: 'message',
+    });
   },
 );

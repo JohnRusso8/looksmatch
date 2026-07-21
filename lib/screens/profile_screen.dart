@@ -1,16 +1,39 @@
 import 'package:flutter/material.dart';
 
 import '../services/auth_controller.dart';
+import '../services/profile_cache.dart';
 import '../theme/app_theme.dart';
 import '../widgets/network_avatar.dart';
-import '../widgets/sign_out_dialog.dart';
+import 'admin_review_screen.dart';
 import 'edit_profile_screen.dart';
+import 'preferences_screen.dart';
 import 'scoring_screen.dart';
+import 'settings_screen.dart';
 
-class ProfileScreen extends StatelessWidget {
-  const ProfileScreen({super.key, required this.auth});
+class ProfileScreen extends StatefulWidget {
+  const ProfileScreen({
+    super.key,
+    required this.auth,
+    required this.profileCache,
+  });
 
   final AuthController auth;
+  final ProfileCache profileCache;
+
+  @override
+  State<ProfileScreen> createState() => _ProfileScreenState();
+}
+
+class _ProfileScreenState extends State<ProfileScreen> {
+  AuthController get auth => widget.auth;
+
+  // Checked once per mount rather than inline in build() — this screen's
+  // body rebuilds on every watchProfile() emission (a live Firestore
+  // listener), and re-firing the reviewer-status call on every single one
+  // of those meant the FutureBuilder could spend most of its time stuck
+  // back in the "waiting" state, hiding the tile, instead of ever settling
+  // long enough to show it.
+  late final Future<bool> _reviewerStatus = auth.checkReviewerStatus();
 
   @override
   Widget build(BuildContext context) {
@@ -34,29 +57,32 @@ class ProfileScreen extends StatelessWidget {
         ),
         actions: [
           IconButton(
-            tooltip: 'Log out',
-            onPressed: () =>
-                confirmSignOut(context: context, onSignOut: auth.signOut),
-            icon: Icon(Icons.logout_rounded, color: colors.headerIconColor),
-          ),
-          IconButton(
             tooltip: 'Settings',
-            onPressed: () {},
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => SettingsScreen(
+                  auth: auth,
+                  profileCache: widget.profileCache,
+                ),
+              ),
+            ),
             icon: Icon(Icons.settings_outlined, color: colors.headerIconColor),
           ),
         ],
       ),
-      body: StreamBuilder<Map<String, dynamic>?>(
-        stream: auth.watchProfile(),
-        builder: (context, snapshot) {
-          final profile = snapshot.data;
+      body: ListenableBuilder(
+        listenable: widget.profileCache,
+        builder: (context, _) {
+          final profile = widget.profileCache.profile;
           final name = (profile?['name'] as String?)?.trim();
           final rawPhotos = profile?['photos'];
           final photos = rawPhotos is List
               ? rawPhotos.whereType<Map>().toList()
               : const <Map>[];
-          final primaryPhotoUrl =
-              photos.isEmpty ? '' : (photos.first['url'] ?? '').toString();
+          final primaryPhotoUrl = photos.isEmpty
+              ? ''
+              : (photos.first['url'] ?? '').toString();
           final status = profile?['scoringStatus'] as String?;
 
           return ListView(
@@ -67,7 +93,10 @@ class ProfileScreen extends StatelessWidget {
                   onTap: () => Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) => EditProfileScreen(auth: auth),
+                      builder: (_) => EditProfileScreen(
+                        auth: auth,
+                        profileCache: widget.profileCache,
+                      ),
                     ),
                   ),
                   child: Stack(
@@ -138,7 +167,12 @@ class ProfileScreen extends StatelessWidget {
                 status: status,
                 onTap: () => Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (_) => ScoringScreen(auth: auth)),
+                  MaterialPageRoute(
+                    builder: (_) => ScoringScreen(
+                      auth: auth,
+                      profileCache: widget.profileCache,
+                    ),
+                  ),
                 ),
               ),
               const SizedBox(height: 22),
@@ -167,7 +201,10 @@ class ProfileScreen extends StatelessWidget {
                       onTap: () => Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) => EditProfileScreen(auth: auth),
+                          builder: (_) => EditProfileScreen(
+                            auth: auth,
+                            profileCache: widget.profileCache,
+                          ),
                         ),
                       ),
                       child: DottedAddTile(colors: colors),
@@ -185,7 +222,10 @@ class ProfileScreen extends StatelessWidget {
                 onTap: () => Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) => EditProfileScreen(auth: auth),
+                    builder: (_) => EditProfileScreen(
+                      auth: auth,
+                      profileCache: widget.profileCache,
+                    ),
                   ),
                 ),
               ),
@@ -193,6 +233,15 @@ class ProfileScreen extends StatelessWidget {
                 colors: colors,
                 icon: Icons.tune_rounded,
                 label: 'Match Preferences',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => PreferencesScreen(
+                      auth: auth,
+                      profileCache: widget.profileCache,
+                    ),
+                  ),
+                ),
               ),
               _menuTile(
                 colors: colors,
@@ -204,14 +253,33 @@ class ProfileScreen extends StatelessWidget {
                 icon: Icons.help_outline_rounded,
                 label: 'Help & Support',
               ),
-              const SizedBox(height: 14),
-              _menuTile(
-                colors: colors,
-                icon: Icons.logout_rounded,
-                label: 'Log Out',
-                destructive: true,
-                onTap: () =>
-                    confirmSignOut(context: context, onSignOut: auth.signOut),
+              // Only reviewers (adminConfig.reviewerUids — see
+              // functions/index.js) see this at all; every action inside
+              // the screen it opens is re-verified server-side regardless.
+              FutureBuilder<bool>(
+                future: _reviewerStatus,
+                builder: (context, snapshot) {
+                  if (snapshot.hasError) {
+                    // Surfaced rather than silently hidden — a failed
+                    // reviewer check used to look identical to "not a
+                    // reviewer", which made this impossible to debug from
+                    // the UI alone.
+                    debugPrint('checkReviewerStatus failed: ${snapshot.error}');
+                    return const SizedBox.shrink();
+                  }
+                  if (snapshot.data != true) return const SizedBox.shrink();
+                  return _menuTile(
+                    colors: colors,
+                    icon: Icons.admin_panel_settings_outlined,
+                    label: 'Review Queue',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => AdminReviewScreen(auth: auth),
+                      ),
+                    ),
+                  );
+                },
               ),
             ],
           );
@@ -349,7 +417,10 @@ class _ScoreCard extends StatelessWidget {
                   ],
                 ),
               ),
-              Icon(Icons.chevron_right_rounded, color: colors.headerSecondaryText),
+              Icon(
+                Icons.chevron_right_rounded,
+                color: colors.headerSecondaryText,
+              ),
             ],
           ),
         ),

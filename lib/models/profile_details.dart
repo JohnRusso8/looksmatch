@@ -103,6 +103,90 @@ const List<String> kInterestOptions = [
   'Karaoke',
 ];
 
+/// Preset personal values a user can multi-select from — same overlap-based
+/// compatibility treatment as interests (see computeCompatibility in
+/// functions/index.js).
+const List<String> kValuesOptions = [
+  'Family-oriented',
+  'Career-driven',
+  'Spirituality',
+  'Adventurous',
+  'Environmentally conscious',
+  'Community-minded',
+  'Financially responsible',
+  'Creativity',
+  'Honesty',
+  'Loyalty',
+  'Personal growth',
+  'Independence',
+  'Health & wellness',
+  'Open-mindedness',
+  'Traditional values',
+  'Social justice',
+  'Education',
+  'Humor',
+  'Ambition',
+  'Stability',
+];
+
+const List<String> kMusicGenreOptions = [
+  'Pop',
+  'Hip-Hop/Rap',
+  'R&B',
+  'Rock',
+  'Indie',
+  'Alternative',
+  'Country',
+  'EDM/Electronic',
+  'Jazz',
+  'Classical',
+  'Latin',
+  'K-Pop',
+  'Reggae/Reggaeton',
+  'Metal',
+  'Folk/Acoustic',
+  'Punk',
+  'Soul/Funk',
+  'Gospel/Christian',
+  'Afrobeats',
+  'Musical theatre',
+];
+
+const List<String> kFavoriteFoodOptions = [
+  'Italian',
+  'Mexican',
+  'Chinese',
+  'Japanese/Sushi',
+  'Thai',
+  'Indian',
+  'Korean',
+  'Mediterranean',
+  'American/BBQ',
+  'French',
+  'Vietnamese',
+  'Middle Eastern',
+  'Spanish/Tapas',
+  'Caribbean',
+  'Vegan/Vegetarian',
+  'Southern/Soul food',
+  'Greek',
+  'Ethiopian',
+  'Seafood',
+  'Desserts/Sweets',
+];
+
+/// Preset stances on having/wanting children — shown as a self-description
+/// trait (with its own visibility toggle) and usable as a preference filter
+/// (see preferredFamilyPlans below and matchesTraitPreferences in
+/// functions/index.js).
+const List<String> kFamilyPlansOptions = [
+  'Don\'t want children',
+  'Want children someday',
+  'Open to children',
+  'Have children',
+  'Not sure yet',
+];
+
 const List<String> kUsStates = [
   'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA',
   'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD',
@@ -118,6 +202,9 @@ const List<String> kVisibilityFields = [
   'bio',
   'prompts',
   'interests',
+  'values',
+  'musicGenres',
+  'favoriteFoods',
   'ethnicity',
   'relationshipType',
   'datingIntention',
@@ -126,6 +213,7 @@ const List<String> kVisibilityFields = [
   'smoking',
   'educationLevel',
   'college',
+  'familyPlans',
 ];
 
 /// This user's own bio/prompts/traits, their per-field visibility choices,
@@ -138,6 +226,9 @@ class ProfileDetails {
     this.bio = '',
     this.prompts = const [],
     this.interests = const [],
+    this.values = const [],
+    this.musicGenres = const [],
+    this.favoriteFoods = const [],
     this.ethnicity,
     this.relationshipType,
     this.datingIntention,
@@ -145,12 +236,19 @@ class ProfileDetails {
     this.drinking,
     this.smoking,
     this.educationLevel,
+    this.familyPlans,
     this.college = '',
     this.city = '',
     this.state,
     this.ageRangeMin,
     this.ageRangeMax,
     this.maxDistanceMiles,
+    this.preferredEthnicities = const [],
+    this.minHeightInches,
+    this.maxHeightInches,
+    this.preferredRelationshipTypes = const [],
+    this.preferredFamilyPlans = const [],
+    this.preferredEducationLevels = const [],
     this.hiddenFields = const {},
   });
 
@@ -162,10 +260,20 @@ class ProfileDetails {
         ? rawPrompts.whereType<Map>().map(ProfilePrompt.fromMap).toList()
         : const <ProfilePrompt>[];
 
-    final rawInterests = map['interests'];
-    final interests = rawInterests is List
-        ? rawInterests.map((i) => i.toString()).where((i) => i.isNotEmpty).toList()
-        : const <String>[];
+    List<String> parseStringList(dynamic raw) {
+      return raw is List
+          ? raw.map((i) => i.toString()).where((i) => i.isNotEmpty).toList()
+          : const <String>[];
+    }
+
+    final interests = parseStringList(map['interests']);
+    final values = parseStringList(map['values']);
+    final musicGenres = parseStringList(map['musicGenres']);
+    final favoriteFoods = parseStringList(map['favoriteFoods']);
+    final preferredEthnicities = parseStringList(map['preferredEthnicities']);
+    final preferredRelationshipTypes = parseStringList(map['preferredRelationshipTypes']);
+    final preferredFamilyPlans = parseStringList(map['preferredFamilyPlans']);
+    final preferredEducationLevels = parseStringList(map['preferredEducationLevels']);
 
     final rawVisibility = map['fieldVisibility'];
     final hidden = <String>{};
@@ -179,6 +287,9 @@ class ProfileDetails {
       bio: (map['bio'] ?? '').toString(),
       prompts: prompts,
       interests: interests,
+      values: values,
+      musicGenres: musicGenres,
+      favoriteFoods: favoriteFoods,
       ethnicity: map['ethnicity'] as String?,
       relationshipType: map['relationshipType'] as String?,
       datingIntention: map['datingIntention'] as String?,
@@ -186,12 +297,19 @@ class ProfileDetails {
       drinking: map['drinking'] as String?,
       smoking: map['smoking'] as String?,
       educationLevel: map['educationLevel'] as String?,
+      familyPlans: map['familyPlans'] as String?,
       college: (map['college'] ?? '').toString(),
       city: (map['city'] ?? '').toString(),
       state: map['state'] as String?,
       ageRangeMin: (map['ageRangeMin'] as num?)?.toInt(),
       ageRangeMax: (map['ageRangeMax'] as num?)?.toInt(),
       maxDistanceMiles: (map['maxDistanceMiles'] as num?)?.toInt(),
+      preferredEthnicities: preferredEthnicities,
+      minHeightInches: (map['minHeightInches'] as num?)?.toInt(),
+      maxHeightInches: (map['maxHeightInches'] as num?)?.toInt(),
+      preferredRelationshipTypes: preferredRelationshipTypes,
+      preferredFamilyPlans: preferredFamilyPlans,
+      preferredEducationLevels: preferredEducationLevels,
       hiddenFields: hidden,
     );
   }
@@ -199,6 +317,9 @@ class ProfileDetails {
   final String bio;
   final List<ProfilePrompt> prompts;
   final List<String> interests;
+  final List<String> values;
+  final List<String> musicGenres;
+  final List<String> favoriteFoods;
   final String? ethnicity;
   final String? relationshipType;
   final String? datingIntention;
@@ -206,6 +327,7 @@ class ProfileDetails {
   final String? drinking;
   final String? smoking;
   final String? educationLevel;
+  final String? familyPlans;
   final String college;
 
   /// The city/state typed into the location field — kept only so the edit
@@ -218,6 +340,19 @@ class ProfileDetails {
   final int? ageRangeMin;
   final int? ageRangeMax;
   final int? maxDistanceMiles;
+
+  /// Matching preferences below — private, never shown on this user's
+  /// profile, used only server-side to filter who shows up in Discover
+  /// (see matchesTraitPreferences in functions/index.js). An empty list or
+  /// unset range means "no preference" — nobody gets excluded on that
+  /// dimension until the user actively sets one.
+  final List<String> preferredEthnicities;
+  final int? minHeightInches;
+  final int? maxHeightInches;
+  final List<String> preferredRelationshipTypes;
+  final List<String> preferredFamilyPlans;
+  final List<String> preferredEducationLevels;
+
   final Set<String> hiddenFields;
 
   bool isHidden(String field) => hiddenFields.contains(field);
@@ -226,6 +361,9 @@ class ProfileDetails {
     String? bio,
     List<ProfilePrompt>? prompts,
     List<String>? interests,
+    List<String>? values,
+    List<String>? musicGenres,
+    List<String>? favoriteFoods,
     String? ethnicity,
     String? relationshipType,
     String? datingIntention,
@@ -233,18 +371,28 @@ class ProfileDetails {
     String? drinking,
     String? smoking,
     String? educationLevel,
+    String? familyPlans,
     String? college,
     String? city,
     String? state,
     int? ageRangeMin,
     int? ageRangeMax,
     int? maxDistanceMiles,
+    List<String>? preferredEthnicities,
+    int? minHeightInches,
+    int? maxHeightInches,
+    List<String>? preferredRelationshipTypes,
+    List<String>? preferredFamilyPlans,
+    List<String>? preferredEducationLevels,
     Set<String>? hiddenFields,
   }) {
     return ProfileDetails(
       bio: bio ?? this.bio,
       prompts: prompts ?? this.prompts,
       interests: interests ?? this.interests,
+      values: values ?? this.values,
+      musicGenres: musicGenres ?? this.musicGenres,
+      favoriteFoods: favoriteFoods ?? this.favoriteFoods,
       ethnicity: ethnicity ?? this.ethnicity,
       relationshipType: relationshipType ?? this.relationshipType,
       datingIntention: datingIntention ?? this.datingIntention,
@@ -252,12 +400,19 @@ class ProfileDetails {
       drinking: drinking ?? this.drinking,
       smoking: smoking ?? this.smoking,
       educationLevel: educationLevel ?? this.educationLevel,
+      familyPlans: familyPlans ?? this.familyPlans,
       college: college ?? this.college,
       city: city ?? this.city,
       state: state ?? this.state,
       ageRangeMin: ageRangeMin ?? this.ageRangeMin,
       ageRangeMax: ageRangeMax ?? this.ageRangeMax,
       maxDistanceMiles: maxDistanceMiles ?? this.maxDistanceMiles,
+      preferredEthnicities: preferredEthnicities ?? this.preferredEthnicities,
+      minHeightInches: minHeightInches ?? this.minHeightInches,
+      maxHeightInches: maxHeightInches ?? this.maxHeightInches,
+      preferredRelationshipTypes: preferredRelationshipTypes ?? this.preferredRelationshipTypes,
+      preferredFamilyPlans: preferredFamilyPlans ?? this.preferredFamilyPlans,
+      preferredEducationLevels: preferredEducationLevels ?? this.preferredEducationLevels,
       hiddenFields: hiddenFields ?? this.hiddenFields,
     );
   }
@@ -267,6 +422,9 @@ class ProfileDetails {
       'bio': bio,
       'prompts': prompts.map((p) => p.toMap()).toList(),
       'interests': interests,
+      'values': values,
+      'musicGenres': musicGenres,
+      'favoriteFoods': favoriteFoods,
       'ethnicity': ethnicity,
       'relationshipType': relationshipType,
       'datingIntention': datingIntention,
@@ -274,12 +432,19 @@ class ProfileDetails {
       'drinking': drinking,
       'smoking': smoking,
       'educationLevel': educationLevel,
+      'familyPlans': familyPlans,
       'college': college,
       'city': city,
       'state': state,
       'ageRangeMin': ageRangeMin,
       'ageRangeMax': ageRangeMax,
       'maxDistanceMiles': maxDistanceMiles,
+      'preferredEthnicities': preferredEthnicities,
+      'minHeightInches': minHeightInches,
+      'maxHeightInches': maxHeightInches,
+      'preferredRelationshipTypes': preferredRelationshipTypes,
+      'preferredFamilyPlans': preferredFamilyPlans,
+      'preferredEducationLevels': preferredEducationLevels,
       'fieldVisibility': {
         for (final field in kVisibilityFields) field: !hiddenFields.contains(field),
       },

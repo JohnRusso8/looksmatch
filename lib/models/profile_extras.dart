@@ -24,6 +24,9 @@ class ProfileExtras {
     this.bio = '',
     this.prompts = const [],
     this.interests = const [],
+    this.values = const [],
+    this.musicGenres = const [],
+    this.favoriteFoods = const [],
     this.ethnicity,
     this.relationshipType,
     this.datingIntention,
@@ -31,6 +34,7 @@ class ProfileExtras {
     this.drinking,
     this.smoking,
     this.educationLevel,
+    this.familyPlans,
     this.college,
     this.distanceMiles,
     this.compatibilityPercent,
@@ -42,15 +46,19 @@ class ProfileExtras {
         ? rawPrompts.whereType<Map>().map(ProfilePrompt.fromMap).toList()
         : const <ProfilePrompt>[];
 
-    final rawInterests = map['interests'];
-    final interests = rawInterests is List
-        ? rawInterests.map((i) => i.toString()).where((i) => i.isNotEmpty).toList()
-        : const <String>[];
+    List<String> parseStringList(dynamic raw) {
+      return raw is List
+          ? raw.map((i) => i.toString()).where((i) => i.isNotEmpty).toList()
+          : const <String>[];
+    }
 
     return ProfileExtras(
       bio: (map['bio'] ?? '').toString(),
       prompts: prompts,
-      interests: interests,
+      interests: parseStringList(map['interests']),
+      values: parseStringList(map['values']),
+      musicGenres: parseStringList(map['musicGenres']),
+      favoriteFoods: parseStringList(map['favoriteFoods']),
       ethnicity: map['ethnicity'] as String?,
       relationshipType: map['relationshipType'] as String?,
       datingIntention: map['datingIntention'] as String?,
@@ -58,6 +66,7 @@ class ProfileExtras {
       drinking: map['drinking'] as String?,
       smoking: map['smoking'] as String?,
       educationLevel: map['educationLevel'] as String?,
+      familyPlans: map['familyPlans'] as String?,
       college: map['college'] as String?,
       distanceMiles: (map['distanceMiles'] as num?)?.toInt(),
       compatibilityPercent: (map['compatibilityPercent'] as num?)?.toInt(),
@@ -67,6 +76,9 @@ class ProfileExtras {
   final String bio;
   final List<ProfilePrompt> prompts;
   final List<String> interests;
+  final List<String> values;
+  final List<String> musicGenres;
+  final List<String> favoriteFoods;
   final String? ethnicity;
   final String? relationshipType;
   final String? datingIntention;
@@ -74,6 +86,7 @@ class ProfileExtras {
   final String? drinking;
   final String? smoking;
   final String? educationLevel;
+  final String? familyPlans;
   final String? college;
   final int? distanceMiles;
 
@@ -92,6 +105,9 @@ class ProfileExtras {
       bio.isNotEmpty ||
       prompts.isNotEmpty ||
       interests.isNotEmpty ||
+      values.isNotEmpty ||
+      musicGenres.isNotEmpty ||
+      favoriteFoods.isNotEmpty ||
       ethnicity != null ||
       relationshipType != null ||
       datingIntention != null ||
@@ -99,5 +115,6 @@ class ProfileExtras {
       drinking != null ||
       smoking != null ||
       educationLevel != null ||
+      familyPlans != null ||
       (college?.isNotEmpty ?? false);
 }

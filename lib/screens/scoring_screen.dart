@@ -1,17 +1,22 @@
 import 'package:flutter/material.dart';
 
 import '../services/auth_controller.dart';
+import '../services/profile_cache.dart';
 import '../theme/app_theme.dart';
 
 const Map<String, String> _rejectionMessages = {
-  'no_face_detected': 'We couldn\'t detect a face in that photo. Try one '
+  'no_face_detected':
+      'We couldn\'t detect a face in that photo. Try one '
       'where your face is clearly visible.',
-  'multiple_faces': 'That photo has more than one person in it. Use a '
+  'multiple_faces':
+      'That photo has more than one person in it. Use a '
       'photo of just you.',
-  'face_obscured': 'Your face looks obscured (sunglasses, mask, or '
+  'face_obscured':
+      'Your face looks obscured (sunglasses, mask, or '
       'similar). Try a clearer, unobstructed photo.',
   'eyes_closed': 'Your eyes appear closed in that photo. Try another one.',
-  'low_quality': 'That photo is too blurry or the lighting is too dark or '
+  'low_quality':
+      'That photo is too blurry or the lighting is too dark or '
       'too bright. Try a sharper, well-lit photo.',
   'extreme_pose': 'Try a photo facing more directly toward the camera.',
   'inappropriate_content': 'That photo can\'t be used. Try a different one.',
@@ -25,9 +30,14 @@ String _rejectionMessage(String? reason) {
 enum _ScoringStep { choosePhoto, submitting, scored, rejected }
 
 class ScoringScreen extends StatefulWidget {
-  const ScoringScreen({super.key, required this.auth});
+  const ScoringScreen({
+    super.key,
+    required this.auth,
+    required this.profileCache,
+  });
 
   final AuthController auth;
+  final ProfileCache profileCache;
 
   @override
   State<ScoringScreen> createState() => _ScoringScreenState();
@@ -122,18 +132,16 @@ class _ScoringScreenState extends State<ScoringScreen> {
   }
 
   Widget _choosePhotoView(LooksMatchColors colors) {
-    return StreamBuilder<Map<String, dynamic>?>(
-      stream: widget.auth.watchProfile(),
-      builder: (context, snapshot) {
-        final rawPhotos = snapshot.data?['photos'];
+    return ListenableBuilder(
+      listenable: widget.profileCache,
+      builder: (context, _) {
+        final rawPhotos = widget.profileCache.profile?['photos'];
         final photos = rawPhotos is List
             ? rawPhotos.whereType<Map>().toList()
             : const <Map>[];
 
-        if (!snapshot.hasData) {
-          return Center(
-            child: CircularProgressIndicator(color: colors.accent),
-          );
+        if (!widget.profileCache.hasProfile) {
+          return Center(child: CircularProgressIndicator(color: colors.accent));
         }
 
         if (photos.isEmpty) {
@@ -201,9 +209,7 @@ class _ScoringScreenState extends State<ScoringScreen> {
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(16),
                           border: Border.all(
-                            color: selected
-                                ? colors.accent
-                                : colors.cardBorder,
+                            color: selected ? colors.accent : colors.cardBorder,
                             width: selected ? 2.5 : 1,
                           ),
                         ),
@@ -213,9 +219,8 @@ class _ScoringScreenState extends State<ScoringScreen> {
                             Image.network(
                               url,
                               fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) => Container(
-                                color: colors.inputBackground,
-                              ),
+                              errorBuilder: (_, __, ___) =>
+                                  Container(color: colors.inputBackground),
                             ),
                             if (selected)
                               Positioned(
@@ -253,8 +258,8 @@ class _ScoringScreenState extends State<ScoringScreen> {
               style: ElevatedButton.styleFrom(
                 backgroundColor: colors.primaryButtonBackground,
                 foregroundColor: colors.primaryButtonText,
-                disabledBackgroundColor:
-                    colors.primaryButtonBackground.withOpacity(0.5),
+                disabledBackgroundColor: colors.primaryButtonBackground
+                    .withOpacity(0.5),
                 minimumSize: const Size.fromHeight(52),
                 elevation: 0,
                 shape: RoundedRectangleBorder(
@@ -328,7 +333,10 @@ class _ScoringScreenState extends State<ScoringScreen> {
               borderRadius: BorderRadius.circular(14),
             ),
           ),
-          child: const Text('Done', style: TextStyle(fontWeight: FontWeight.w900)),
+          child: const Text(
+            'Done',
+            style: TextStyle(fontWeight: FontWeight.w900),
+          ),
         ),
       ],
     );

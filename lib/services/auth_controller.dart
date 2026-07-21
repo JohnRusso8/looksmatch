@@ -4,12 +4,14 @@ import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 
 import '../models/discover_candidate.dart';
 import '../models/likes_and_matches.dart';
 import '../models/profile_details.dart';
+import '../models/review_entry.dart';
 
 /// A profile photo's public URL and its Storage path — both are needed
 /// because scoring points at the Storage path of an existing profile
@@ -45,16 +47,6 @@ abstract class AuthController extends ChangeNotifier {
 
   String? get currentUserId;
 
-  Future<void> createAccountWithEmail({
-    required String email,
-    required String password,
-  });
-
-  Future<void> signInWithEmail({
-    required String email,
-    required String password,
-  });
-
   Future<PhoneVerificationSession> sendPhoneVerificationCode({
     required String phoneNumber,
     int? forceResendingToken,
@@ -68,12 +60,16 @@ abstract class AuthController extends ChangeNotifier {
 
   Future<void> signOut();
 
-  /// Whether the signed-in user has finished the required profile fields
-  /// (name, birth date, gender, interested-in, at least one photo). Drives
-  /// whether [AuthGate] shows profile setup or the home screen.
-  Stream<bool> watchProfileCompleted();
+  /// Permanently deletes the account and everything tied to it (profile,
+  /// photos, matches, messages) — see deleteAccount in functions/index.js.
+  /// Signs the local session out afterward so the app routes back to the
+  /// welcome screen immediately rather than waiting for a future request
+  /// to discover the Auth user is gone.
+  Future<void> deleteAccount();
 
   /// The full users/{uid} document, or null if signed out / not created yet.
+  /// Drives AuthGate (profileCompleted, accountStatus) as well as the
+  /// profile screens.
   Stream<Map<String, dynamic>?> watchProfile();
 
   Future<ProfilePhoto> uploadProfilePhoto(File file);
@@ -90,6 +86,24 @@ abstract class AuthController extends ChangeNotifier {
     required String interestedIn,
     required List<ProfilePhoto> photos,
   });
+
+  /// Updates just the gender-interest preference — lighter weight than
+  /// [saveProfile], which requires every core field together. Used by
+  /// PreferencesScreen, which doesn't own the rest of those fields.
+  Future<void> updateInterestedIn(String interestedIn);
+
+  /// Hides this account from Discover without deleting anything — existing
+  /// matches/messages stay fully usable, only new discovery is affected.
+  /// Self-service, unlike accountStatus which only a reviewer can set.
+  Future<void> setAccountPaused(bool paused);
+
+  /// Which push notification categories this account wants — keys are
+  /// 'like' / 'match' / 'message', matching the category sendPushToUser
+  /// checks server-side (see functions/index.js). Missing keys default to
+  /// enabled. Pass the full map every time (not just the key that
+  /// changed) — this replaces the whole notificationPrefs field rather
+  /// than merging into it.
+  Future<void> setNotificationPrefs(Map<String, bool> prefs);
 
   /// Calls the scorePhoto Cloud Function on an existing profile photo
   /// (identified by its Storage path — must be one of this user's own
@@ -126,6 +140,14 @@ abstract class AuthController extends ChangeNotifier {
 
   Future<void> sendMessage({required String connectionId, required String text});
 
+  /// Double-tap-to-heart a message, iMessage-tapback style. addReaction
+  /// true hearts it (adds the caller's uid), false un-hearts it.
+  Future<void> toggleMessageReaction({
+    required String connectionId,
+    required String messageId,
+    required bool addReaction,
+  });
+
   /// This user's own bio/prompts/traits, visibility choices, and matching
   /// preferences (age range, max distance) — never what others see of them.
   Stream<ProfileDetails> watchProfileDetails();
@@ -136,6 +158,49 @@ abstract class AuthController extends ChangeNotifier {
   /// matching and "N miles away" — raw coordinates never come back to any
   /// client, including this one; see functions/index.js enrichSummaries.
   Future<void> updateLocation({required double lat, required double lng});
+
+  /// Files a report against another user. Reports are deduplicated
+  /// server-side by reporter, so repeat calls from this user overwrite
+  /// rather than pile up. At 5 distinct reports the target's account is
+  /// automatically placed under review.
+  Future<void> reportUser({
+    required String reportedUid,
+    required String reason,
+    String details,
+  });
+
+  /// Blocks another user — mutually invisible in Discover/Likes/Matches
+  /// afterward, in both directions.
+  Future<void> blockUser(String blockedUid);
+
+  /// Registers this device's push token so Cloud Functions can notify it
+  /// of new matches/likes/messages — see sendPushToUser in
+  /// functions/index.js. Safe to call repeatedly with the same token.
+  Future<void> registerFcmToken(String token);
+
+  /// Called on sign-out so a shared/reused device stops receiving this
+  /// account's pushes once someone else signs in on it.
+  Future<void> unregisterFcmToken(String token);
+
+  /// Whether the signed-in user is in adminConfig's reviewerUids list —
+  /// gates whether the Review Queue is shown at all. Checked server-side on
+  /// every review action too, so this is purely a UI-visibility check, not
+  /// itself a security boundary.
+  Future<bool> checkReviewerStatus();
+
+  /// Every account currently flagged (auto-flagged or already
+  /// suspended/banned) for a reviewer to act on. Throws if the caller isn't
+  /// a reviewer.
+  Future<List<ReviewEntry>> getReviewQueue();
+
+  /// Applies a moderation decision to targetUid — 'permanent' ban,
+  /// 'temporary' suspension (requires durationDays), or 'clear' to restore
+  /// access. Throws if the caller isn't a reviewer.
+  Future<void> banUser({
+    required String targetUid,
+    required String action,
+    int? durationDays,
+  });
 }
 
 class FirebaseAuthController extends AuthController {
@@ -170,28 +235,6 @@ class FirebaseAuthController extends AuthController {
 
   @override
   String? get currentUserId => _firebaseAuth.currentUser?.uid;
-
-  @override
-  Future<void> createAccountWithEmail({
-    required String email,
-    required String password,
-  }) async {
-    await _firebaseAuth.createUserWithEmailAndPassword(
-      email: email.trim(),
-      password: password,
-    );
-  }
-
-  @override
-  Future<void> signInWithEmail({
-    required String email,
-    required String password,
-  }) async {
-    await _firebaseAuth.signInWithEmailAndPassword(
-      email: email.trim(),
-      password: password,
-    );
-  }
 
   @override
   Future<PhoneVerificationSession> sendPhoneVerificationCode({
@@ -259,7 +302,26 @@ class FirebaseAuthController extends AuthController {
   }
 
   @override
-  Future<void> signOut() => _firebaseAuth.signOut();
+  Future<void> signOut() async {
+    // Best-effort — a shared/reused device shouldn't keep getting this
+    // account's pushes after sign-out, but a failure here must never block
+    // the actual sign-out.
+    try {
+      final token = await FirebaseMessaging.instance.getToken();
+      if (token != null) await unregisterFcmToken(token);
+    } catch (error) {
+      debugPrint('Could not unregister push token on sign-out: $error');
+    }
+
+    await _firebaseAuth.signOut();
+  }
+
+  @override
+  Future<void> deleteAccount() async {
+    final callable = _functions.httpsCallable('deleteAccount');
+    await callable.call<Map<String, dynamic>>();
+    await _firebaseAuth.signOut();
+  }
 
   @override
   Stream<Map<String, dynamic>?> watchProfile() {
@@ -272,10 +334,6 @@ class FirebaseAuthController extends AuthController {
         .snapshots()
         .map((snapshot) => snapshot.data());
   }
-
-  @override
-  Stream<bool> watchProfileCompleted() =>
-      watchProfile().map((data) => data?['profileCompleted'] == true);
 
   @override
   Future<ProfilePhoto> uploadProfilePhoto(File file) async {
@@ -334,6 +392,39 @@ class FirebaseAuthController extends AuthController {
     } catch (error) {
       debugPrint('Could not save Firebase display name: $error');
     }
+  }
+
+  @override
+  Future<void> updateInterestedIn(String interestedIn) async {
+    final uid = currentUserId;
+    if (uid == null) throw StateError('No signed-in user.');
+
+    await _firestore.collection('users').doc(uid).set({
+      'interestedIn': interestedIn,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  @override
+  Future<void> setAccountPaused(bool paused) async {
+    final uid = currentUserId;
+    if (uid == null) throw StateError('No signed-in user.');
+
+    await _firestore.collection('users').doc(uid).set({
+      'paused': paused,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  @override
+  Future<void> setNotificationPrefs(Map<String, bool> prefs) async {
+    final uid = currentUserId;
+    if (uid == null) throw StateError('No signed-in user.');
+
+    await _firestore.collection('users').doc(uid).set({
+      'notificationPrefs': prefs,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
   }
 
   @override
@@ -418,6 +509,7 @@ class FirebaseAuthController extends AuthController {
                   senderId: (doc.data()['senderId'] ?? '').toString(),
                   text: (doc.data()['text'] ?? '').toString(),
                   sentAt: (doc.data()['sentAt'] as Timestamp?)?.toDate(),
+                  heartedByUids: List<String>.from(doc.data()['heartedByUids'] ?? const []),
                 ),
               )
               .toList(),
@@ -443,6 +535,26 @@ class FirebaseAuthController extends AuthController {
           'senderId': uid,
           'text': trimmed,
           'sentAt': FieldValue.serverTimestamp(),
+        });
+  }
+
+  @override
+  Future<void> toggleMessageReaction({
+    required String connectionId,
+    required String messageId,
+    required bool addReaction,
+  }) async {
+    final uid = currentUserId;
+    if (uid == null) throw StateError('No signed-in user.');
+
+    await _firestore
+        .collection('connections')
+        .doc(connectionId)
+        .collection('messages')
+        .doc(messageId)
+        .update({
+          'heartedByUids':
+              addReaction ? FieldValue.arrayUnion([uid]) : FieldValue.arrayRemove([uid]),
         });
   }
 
@@ -476,6 +588,68 @@ class FirebaseAuthController extends AuthController {
   }
 
   @override
+  Future<void> reportUser({
+    required String reportedUid,
+    required String reason,
+    String details = '',
+  }) async {
+    final callable = _functions.httpsCallable('reportUser');
+    await callable.call<Map<String, dynamic>>({
+      'reportedUid': reportedUid,
+      'reason': reason,
+      'details': details,
+    });
+  }
+
+  @override
+  Future<void> blockUser(String blockedUid) async {
+    final callable = _functions.httpsCallable('blockUser');
+    await callable.call<Map<String, dynamic>>({'blockedUid': blockedUid});
+  }
+
+  @override
+  Future<void> registerFcmToken(String token) async {
+    final callable = _functions.httpsCallable('registerFcmToken');
+    await callable.call<Map<String, dynamic>>({'token': token});
+  }
+
+  @override
+  Future<void> unregisterFcmToken(String token) async {
+    final callable = _functions.httpsCallable('unregisterFcmToken');
+    await callable.call<Map<String, dynamic>>({'token': token});
+  }
+
+  @override
+  Future<bool> checkReviewerStatus() async {
+    final callable = _functions.httpsCallable('checkReviewerStatus');
+    final result = await callable.call<Map<String, dynamic>>();
+    return result.data['isReviewer'] == true;
+  }
+
+  @override
+  Future<List<ReviewEntry>> getReviewQueue() async {
+    final callable = _functions.httpsCallable('getReviewQueue');
+    final result = await callable.call<Map<dynamic, dynamic>>();
+    final rawEntries = result.data['entries'];
+    if (rawEntries is! List) return const [];
+    return rawEntries.whereType<Map>().map(ReviewEntry.fromMap).toList();
+  }
+
+  @override
+  Future<void> banUser({
+    required String targetUid,
+    required String action,
+    int? durationDays,
+  }) async {
+    final callable = _functions.httpsCallable('banUser');
+    await callable.call<Map<String, dynamic>>({
+      'targetUid': targetUid,
+      'action': action,
+      if (durationDays != null) 'durationDays': durationDays,
+    });
+  }
+
+  @override
   void dispose() {
     _authSubscription.cancel();
     super.dispose();
@@ -506,14 +680,8 @@ String authErrorMessage(Object error) {
   }
 
   return switch (error.code) {
-    'email-already-in-use' =>
-      'An account already exists for that email address.',
-    'invalid-email' => 'Enter a valid email address.',
-    'weak-password' => 'Use a stronger password and try again.',
     'user-disabled' => 'This account has been disabled.',
-    'user-not-found' ||
-    'wrong-password' ||
-    'invalid-credential' => 'The email or password is incorrect.',
+    'invalid-credential' => 'That sign-in wasn\'t valid. Please try again.',
     'invalid-phone-number' => 'Enter a valid phone number.',
     'invalid-verification-code' => 'That verification code is incorrect.',
     'session-expired' => 'That code expired. Request a new one.',

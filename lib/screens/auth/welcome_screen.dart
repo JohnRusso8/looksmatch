@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../../services/auth_controller.dart';
 import '../../theme/app_theme.dart';
-import 'email_auth_screen.dart';
 import 'phone_auth_screen.dart';
 
 class WelcomeScreen extends StatelessWidget {
@@ -78,29 +77,6 @@ class WelcomeScreen extends StatelessWidget {
                   foregroundColor: colors.primaryButtonText,
                   minimumSize: const Size.fromHeight(52),
                   elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(15),
-                  ),
-                  textStyle: const TextStyle(
-                    fontWeight: FontWeight.w900,
-                    fontSize: 15,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              OutlinedButton.icon(
-                onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => EmailAuthScreen(auth: auth),
-                  ),
-                ),
-                icon: const Icon(Icons.mail_outline_rounded),
-                label: const Text('Continue with Email'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: colors.headerPrimaryText,
-                  side: BorderSide(color: colors.outlineButtonBorder),
-                  minimumSize: const Size.fromHeight(52),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(15),
                   ),
