@@ -66,7 +66,9 @@ class _HomeShellState extends State<HomeShell> {
     // itself is deferred a frame since _selectTab calls setState, which
     // initState can't do synchronously.
     NotificationRouter.pendingTab.addListener(_onNotificationTabRequest);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _onNotificationTabRequest());
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _onNotificationTabRequest(),
+    );
   }
 
   void _onNotificationTabRequest() {
@@ -101,10 +103,15 @@ class _HomeShellState extends State<HomeShell> {
       ),
       LikesScreen(
         auth: widget.auth,
+        profileCache: _profileCache,
         onMatched: _goToMatches,
         refreshToken: _likesRefreshToken,
       ),
-      MatchesScreen(auth: widget.auth, refreshToken: _matchesRefreshToken),
+      MatchesScreen(
+        auth: widget.auth,
+        profileCache: _profileCache,
+        refreshToken: _matchesRefreshToken,
+      ),
       ProfileScreen(auth: widget.auth, profileCache: _profileCache),
     ];
 

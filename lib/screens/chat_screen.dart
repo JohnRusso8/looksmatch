@@ -3,13 +3,24 @@ import 'package:flutter/material.dart';
 import '../models/discover_candidate.dart';
 import '../models/likes_and_matches.dart';
 import '../services/auth_controller.dart';
+import '../services/profile_cache.dart';
 import '../theme/app_theme.dart';
 import '../widgets/network_avatar.dart';
 import 'match_profile_screen.dart';
 
 const List<String> _kMonths = [
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
 ];
 
 String _formatDateHeader(DateTime date) {
@@ -47,8 +58,11 @@ sealed class _ChatListItem {
 }
 
 class _MatchHeaderItem extends _ChatListItem {
-  _MatchHeaderItem({required this.name, required this.connectedAt, required this.hasMessages})
-      : super('header');
+  _MatchHeaderItem({
+    required this.name,
+    required this.connectedAt,
+    required this.hasMessages,
+  }) : super('header');
   final String name;
   final DateTime? connectedAt;
   final bool hasMessages;
@@ -69,7 +83,10 @@ class _MessageItem extends _ChatListItem {
 // exactly like iMessage/Hinge, with no manual scroll-to-bottom bookkeeping:
 // index 0 of a reversed list is always the newest content, which is what a
 // reversed ListView shows at rest.
-List<_ChatListItem> _buildChatItems(List<ChatMessageEntry> messages, MatchConnection match) {
+List<_ChatListItem> _buildChatItems(
+  List<ChatMessageEntry> messages,
+  MatchConnection match,
+) {
   final items = <_ChatListItem>[
     _MatchHeaderItem(
       name: match.name,
@@ -95,9 +112,15 @@ List<_ChatListItem> _buildChatItems(List<ChatMessageEntry> messages, MatchConnec
 }
 
 class ChatScreen extends StatefulWidget {
-  const ChatScreen({super.key, required this.auth, required this.match});
+  const ChatScreen({
+    super.key,
+    required this.auth,
+    required this.profileCache,
+    required this.match,
+  });
 
   final AuthController auth;
+  final ProfileCache profileCache;
   final MatchConnection match;
 
   @override
@@ -180,6 +203,7 @@ class _ChatScreenState extends State<ChatScreen> {
             MaterialPageRoute(
               builder: (_) => MatchProfileScreen(
                 auth: widget.auth,
+                profileCache: widget.profileCache,
                 candidate: DiscoverCandidate(
                   uid: widget.match.uid,
                   name: widget.match.name,
@@ -234,19 +258,21 @@ class _ChatScreenState extends State<ChatScreen> {
                       key: ValueKey(item.key),
                       child: switch (item) {
                         _MatchHeaderItem() => _MatchHeaderWidget(
-                            colors: colors,
-                            name: item.name,
-                            connectedAt: item.connectedAt,
-                            hasMessages: item.hasMessages,
-                          ),
-                        _DateSeparatorItem() =>
-                          _DateSeparatorWidget(colors: colors, date: item.date),
+                          colors: colors,
+                          name: item.name,
+                          connectedAt: item.connectedAt,
+                          hasMessages: item.hasMessages,
+                        ),
+                        _DateSeparatorItem() => _DateSeparatorWidget(
+                          colors: colors,
+                          date: item.date,
+                        ),
                         _MessageItem() => _AnimatedMessageBubble(
-                            message: item.message,
-                            fromMe: item.message.senderId == myUid,
-                            colors: colors,
-                            onDoubleTap: () => _toggleReaction(item.message),
-                          ),
+                          message: item.message,
+                          fromMe: item.message.senderId == myUid,
+                          colors: colors,
+                          onDoubleTap: () => _toggleReaction(item.message),
+                        ),
                       },
                     );
                   },
@@ -407,8 +433,10 @@ class _AnimatedMessageBubbleState extends State<_AnimatedMessageBubble>
     vsync: this,
     duration: const Duration(milliseconds: 260),
   )..forward();
-  late final Animation<double> _fade =
-      CurvedAnimation(parent: _controller, curve: Curves.easeOut);
+  late final Animation<double> _fade = CurvedAnimation(
+    parent: _controller,
+    curve: Curves.easeOut,
+  );
   late final Animation<Offset> _slide = Tween<Offset>(
     begin: const Offset(0, 0.15),
     end: Offset.zero,
@@ -440,7 +468,10 @@ class _AnimatedMessageBubbleState extends State<_AnimatedMessageBubble>
                 clipBehavior: Clip.none,
                 children: [
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 10,
+                    ),
                     constraints: BoxConstraints(
                       maxWidth: MediaQuery.of(context).size.width * 0.72,
                     ),
@@ -494,7 +525,8 @@ class _HeartBadge extends StatelessWidget {
       tween: Tween(begin: 0, end: 1),
       duration: const Duration(milliseconds: 220),
       curve: Curves.elasticOut,
-      builder: (context, value, child) => Transform.scale(scale: value, child: child),
+      builder: (context, value, child) =>
+          Transform.scale(scale: value, child: child),
       child: Container(
         padding: const EdgeInsets.all(5),
         decoration: BoxDecoration(
@@ -502,7 +534,11 @@ class _HeartBadge extends StatelessWidget {
           color: colors.deleteBackground,
           border: Border.all(color: colors.pageBackground, width: 2),
         ),
-        child: const Icon(Icons.favorite_rounded, size: 12, color: Colors.white),
+        child: const Icon(
+          Icons.favorite_rounded,
+          size: 12,
+          color: Colors.white,
+        ),
       ),
     );
   }

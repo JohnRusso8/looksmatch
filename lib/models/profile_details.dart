@@ -54,7 +54,12 @@ const List<String> kDatingIntentionOptions = [
   'Still figuring it out',
 ];
 
-const List<String> kFrequencyOptions = ['Yes', 'Sometimes', 'No', 'Prefer not to say'];
+const List<String> kFrequencyOptions = [
+  'Yes',
+  'Sometimes',
+  'No',
+  'Prefer not to say',
+];
 
 const List<String> kEducationOptions = [
   'High school',
@@ -188,11 +193,56 @@ const List<String> kFamilyPlansOptions = [
 ];
 
 const List<String> kUsStates = [
-  'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA',
-  'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD',
-  'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ',
-  'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC',
-  'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY',
+  'AL',
+  'AK',
+  'AZ',
+  'AR',
+  'CA',
+  'CO',
+  'CT',
+  'DE',
+  'FL',
+  'GA',
+  'HI',
+  'ID',
+  'IL',
+  'IN',
+  'IA',
+  'KS',
+  'KY',
+  'LA',
+  'ME',
+  'MD',
+  'MA',
+  'MI',
+  'MN',
+  'MS',
+  'MO',
+  'MT',
+  'NE',
+  'NV',
+  'NH',
+  'NJ',
+  'NM',
+  'NY',
+  'NC',
+  'ND',
+  'OH',
+  'OK',
+  'OR',
+  'PA',
+  'RI',
+  'SC',
+  'SD',
+  'TN',
+  'TX',
+  'UT',
+  'VT',
+  'VA',
+  'WA',
+  'WV',
+  'WI',
+  'WY',
   'DC',
 ];
 
@@ -229,9 +279,9 @@ class ProfileDetails {
     this.values = const [],
     this.musicGenres = const [],
     this.favoriteFoods = const [],
-    this.ethnicity,
+    this.ethnicities = const [],
     this.relationshipType,
-    this.datingIntention,
+    this.datingIntentions = const [],
     this.heightInches,
     this.drinking,
     this.smoking,
@@ -266,14 +316,31 @@ class ProfileDetails {
           : const <String>[];
     }
 
+    // ethnicity/datingIntention used to be a single string before these
+    // became multi-select — accept either shape so any already-saved
+    // single value still shows up instead of silently disappearing.
+    List<String> parseMultiOrLegacySingle(dynamic raw) {
+      if (raw is List) {
+        return raw.map((i) => i.toString()).where((i) => i.isNotEmpty).toList();
+      }
+      if (raw is String && raw.isNotEmpty) return [raw];
+      return const <String>[];
+    }
+
     final interests = parseStringList(map['interests']);
     final values = parseStringList(map['values']);
     final musicGenres = parseStringList(map['musicGenres']);
     final favoriteFoods = parseStringList(map['favoriteFoods']);
+    final ethnicities = parseMultiOrLegacySingle(map['ethnicity']);
+    final datingIntentions = parseMultiOrLegacySingle(map['datingIntention']);
     final preferredEthnicities = parseStringList(map['preferredEthnicities']);
-    final preferredRelationshipTypes = parseStringList(map['preferredRelationshipTypes']);
+    final preferredRelationshipTypes = parseStringList(
+      map['preferredRelationshipTypes'],
+    );
     final preferredFamilyPlans = parseStringList(map['preferredFamilyPlans']);
-    final preferredEducationLevels = parseStringList(map['preferredEducationLevels']);
+    final preferredEducationLevels = parseStringList(
+      map['preferredEducationLevels'],
+    );
 
     final rawVisibility = map['fieldVisibility'];
     final hidden = <String>{};
@@ -290,9 +357,9 @@ class ProfileDetails {
       values: values,
       musicGenres: musicGenres,
       favoriteFoods: favoriteFoods,
-      ethnicity: map['ethnicity'] as String?,
+      ethnicities: ethnicities,
       relationshipType: map['relationshipType'] as String?,
-      datingIntention: map['datingIntention'] as String?,
+      datingIntentions: datingIntentions,
       heightInches: (map['height'] as num?)?.toInt(),
       drinking: map['drinking'] as String?,
       smoking: map['smoking'] as String?,
@@ -320,9 +387,9 @@ class ProfileDetails {
   final List<String> values;
   final List<String> musicGenres;
   final List<String> favoriteFoods;
-  final String? ethnicity;
+  final List<String> ethnicities;
   final String? relationshipType;
-  final String? datingIntention;
+  final List<String> datingIntentions;
   final int? heightInches;
   final String? drinking;
   final String? smoking;
@@ -364,9 +431,9 @@ class ProfileDetails {
     List<String>? values,
     List<String>? musicGenres,
     List<String>? favoriteFoods,
-    String? ethnicity,
+    List<String>? ethnicities,
     String? relationshipType,
-    String? datingIntention,
+    List<String>? datingIntentions,
     int? heightInches,
     String? drinking,
     String? smoking,
@@ -393,9 +460,9 @@ class ProfileDetails {
       values: values ?? this.values,
       musicGenres: musicGenres ?? this.musicGenres,
       favoriteFoods: favoriteFoods ?? this.favoriteFoods,
-      ethnicity: ethnicity ?? this.ethnicity,
+      ethnicities: ethnicities ?? this.ethnicities,
       relationshipType: relationshipType ?? this.relationshipType,
-      datingIntention: datingIntention ?? this.datingIntention,
+      datingIntentions: datingIntentions ?? this.datingIntentions,
       heightInches: heightInches ?? this.heightInches,
       drinking: drinking ?? this.drinking,
       smoking: smoking ?? this.smoking,
@@ -410,9 +477,11 @@ class ProfileDetails {
       preferredEthnicities: preferredEthnicities ?? this.preferredEthnicities,
       minHeightInches: minHeightInches ?? this.minHeightInches,
       maxHeightInches: maxHeightInches ?? this.maxHeightInches,
-      preferredRelationshipTypes: preferredRelationshipTypes ?? this.preferredRelationshipTypes,
+      preferredRelationshipTypes:
+          preferredRelationshipTypes ?? this.preferredRelationshipTypes,
       preferredFamilyPlans: preferredFamilyPlans ?? this.preferredFamilyPlans,
-      preferredEducationLevels: preferredEducationLevels ?? this.preferredEducationLevels,
+      preferredEducationLevels:
+          preferredEducationLevels ?? this.preferredEducationLevels,
       hiddenFields: hiddenFields ?? this.hiddenFields,
     );
   }
@@ -425,9 +494,9 @@ class ProfileDetails {
       'values': values,
       'musicGenres': musicGenres,
       'favoriteFoods': favoriteFoods,
-      'ethnicity': ethnicity,
+      'ethnicity': ethnicities,
       'relationshipType': relationshipType,
-      'datingIntention': datingIntention,
+      'datingIntention': datingIntentions,
       'height': heightInches,
       'drinking': drinking,
       'smoking': smoking,
@@ -446,7 +515,8 @@ class ProfileDetails {
       'preferredFamilyPlans': preferredFamilyPlans,
       'preferredEducationLevels': preferredEducationLevels,
       'fieldVisibility': {
-        for (final field in kVisibilityFields) field: !hiddenFields.contains(field),
+        for (final field in kVisibilityFields)
+          field: !hiddenFields.contains(field),
       },
     };
   }

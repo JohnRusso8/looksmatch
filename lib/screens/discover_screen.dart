@@ -220,6 +220,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
                     builder: (_) => MatchProfileScreen(
                       auth: widget.auth,
                       candidate: candidate,
+                      profileCache: widget.profileCache,
                       onConnect: () => _decide(candidate, 'liked'),
                       onPass: () => _decide(candidate, 'passed'),
                     ),
@@ -439,7 +440,12 @@ class _HiddenCardStack extends StatelessWidget {
       child: Stack(
         alignment: Alignment.center,
         children: [
-          ghostCard(width: 96, height: 120, rotationTurns: -0.16, opacity: 0.35),
+          ghostCard(
+            width: 96,
+            height: 120,
+            rotationTurns: -0.16,
+            opacity: 0.35,
+          ),
           ghostCard(width: 96, height: 120, rotationTurns: 0.16, opacity: 0.5),
           Container(
             width: 96,
@@ -450,7 +456,11 @@ class _HiddenCardStack extends StatelessWidget {
               borderRadius: BorderRadius.circular(20),
               border: Border.all(color: colors.accent.withOpacity(0.45)),
             ),
-            child: Icon(Icons.lock_clock_rounded, color: colors.accent, size: 30),
+            child: Icon(
+              Icons.lock_clock_rounded,
+              color: colors.accent,
+              size: 30,
+            ),
           ),
         ],
       ),

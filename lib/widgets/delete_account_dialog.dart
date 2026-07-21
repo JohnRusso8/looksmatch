@@ -62,6 +62,10 @@ Future<void> confirmDeleteAccount({
 
   try {
     await onDelete();
+    if (!context.mounted) return;
+    // Same reasoning as confirmSignOut — AuthGate swapping to Welcome
+    // underneath doesn't pop anything stacked on top of it.
+    Navigator.of(context).popUntil((route) => route.isFirst);
   } catch (error) {
     if (!context.mounted) return;
     ScaffoldMessenger.of(context)

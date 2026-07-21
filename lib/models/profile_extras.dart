@@ -27,9 +27,9 @@ class ProfileExtras {
     this.values = const [],
     this.musicGenres = const [],
     this.favoriteFoods = const [],
-    this.ethnicity,
+    this.ethnicities = const [],
     this.relationshipType,
-    this.datingIntention,
+    this.datingIntentions = const [],
     this.heightInches,
     this.drinking,
     this.smoking,
@@ -38,6 +38,8 @@ class ProfileExtras {
     this.college,
     this.distanceMiles,
     this.compatibilityPercent,
+    this.hobbyPhotoUrl,
+    this.foodPhotoUrl,
   });
 
   factory ProfileExtras.fromMap(Map<dynamic, dynamic> map) {
@@ -52,6 +54,17 @@ class ProfileExtras {
           : const <String>[];
     }
 
+    // ethnicity/datingIntention used to be a single string before these
+    // became multi-select — accept either shape so an already-saved single
+    // value still shows up instead of silently disappearing.
+    List<String> parseMultiOrLegacySingle(dynamic raw) {
+      if (raw is List) {
+        return raw.map((i) => i.toString()).where((i) => i.isNotEmpty).toList();
+      }
+      if (raw is String && raw.isNotEmpty) return [raw];
+      return const <String>[];
+    }
+
     return ProfileExtras(
       bio: (map['bio'] ?? '').toString(),
       prompts: prompts,
@@ -59,9 +72,9 @@ class ProfileExtras {
       values: parseStringList(map['values']),
       musicGenres: parseStringList(map['musicGenres']),
       favoriteFoods: parseStringList(map['favoriteFoods']),
-      ethnicity: map['ethnicity'] as String?,
+      ethnicities: parseMultiOrLegacySingle(map['ethnicity']),
       relationshipType: map['relationshipType'] as String?,
-      datingIntention: map['datingIntention'] as String?,
+      datingIntentions: parseMultiOrLegacySingle(map['datingIntention']),
       heightInches: (map['height'] as num?)?.toInt(),
       drinking: map['drinking'] as String?,
       smoking: map['smoking'] as String?,
@@ -70,6 +83,12 @@ class ProfileExtras {
       college: map['college'] as String?,
       distanceMiles: (map['distanceMiles'] as num?)?.toInt(),
       compatibilityPercent: (map['compatibilityPercent'] as num?)?.toInt(),
+      hobbyPhotoUrl: (map['hobbyPhotoUrl'] as String?)?.isNotEmpty == true
+          ? map['hobbyPhotoUrl'] as String
+          : null,
+      foodPhotoUrl: (map['foodPhotoUrl'] as String?)?.isNotEmpty == true
+          ? map['foodPhotoUrl'] as String
+          : null,
     );
   }
 
@@ -79,9 +98,9 @@ class ProfileExtras {
   final List<String> values;
   final List<String> musicGenres;
   final List<String> favoriteFoods;
-  final String? ethnicity;
+  final List<String> ethnicities;
   final String? relationshipType;
-  final String? datingIntention;
+  final List<String> datingIntentions;
   final int? heightInches;
   final String? drinking;
   final String? smoking;
@@ -94,6 +113,11 @@ class ProfileExtras {
   /// fields set to compute anything meaningful from — see
   /// computeCompatibility in functions/index.js.
   final int? compatibilityPercent;
+
+  /// The one photo (if any) this person tagged as "doing a hobby" / "food"
+  /// in EditProfileScreen — see summarizeUserDoc in functions/index.js.
+  final String? hobbyPhotoUrl;
+  final String? foodPhotoUrl;
 
   String get heightLabel {
     final inches = heightInches;
@@ -108,9 +132,9 @@ class ProfileExtras {
       values.isNotEmpty ||
       musicGenres.isNotEmpty ||
       favoriteFoods.isNotEmpty ||
-      ethnicity != null ||
+      ethnicities.isNotEmpty ||
       relationshipType != null ||
-      datingIntention != null ||
+      datingIntentions.isNotEmpty ||
       heightInches != null ||
       drinking != null ||
       smoking != null ||

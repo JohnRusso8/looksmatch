@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/discover_candidate.dart';
 import '../models/likes_and_matches.dart';
 import '../services/auth_controller.dart';
+import '../services/profile_cache.dart';
 import '../theme/app_theme.dart';
 import '../widgets/network_avatar.dart';
 import 'match_profile_screen.dart';
@@ -11,11 +12,13 @@ class LikesScreen extends StatefulWidget {
   const LikesScreen({
     super.key,
     required this.auth,
+    required this.profileCache,
     this.onMatched,
     this.refreshToken = 0,
   });
 
   final AuthController auth;
+  final ProfileCache profileCache;
 
   /// Called when accepting a received like creates a match, so the host
   /// shell can surface the Matches tab.
@@ -214,6 +217,7 @@ class _LikesScreenState extends State<LikesScreen> {
                               final entry = list[index];
                               return _LikeCard(
                                 auth: widget.auth,
+                                profileCache: widget.profileCache,
                                 entry: entry,
                                 onAccept: _showReceived
                                     ? () => _respond(entry, true)
@@ -272,6 +276,7 @@ class _LikesScreenState extends State<LikesScreen> {
 class _LikeCard extends StatelessWidget {
   const _LikeCard({
     required this.auth,
+    required this.profileCache,
     required this.entry,
     this.onAccept,
     this.onDecline,
@@ -279,6 +284,7 @@ class _LikeCard extends StatelessWidget {
   });
 
   final AuthController auth;
+  final ProfileCache profileCache;
   final LikeEntry entry;
   final VoidCallback? onAccept;
   final VoidCallback? onDecline;
@@ -305,6 +311,7 @@ class _LikeCard extends StatelessWidget {
                   MaterialPageRoute(
                     builder: (_) => MatchProfileScreen(
                       auth: auth,
+                      profileCache: profileCache,
                       candidate: DiscoverCandidate(
                         uid: entry.uid,
                         name: entry.name,
@@ -321,7 +328,9 @@ class _LikeCard extends StatelessWidget {
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
-                  entry.age == null ? entry.name : '${entry.name}, ${entry.age}',
+                  entry.age == null
+                      ? entry.name
+                      : '${entry.name}, ${entry.age}',
                   style: TextStyle(
                     color: colors.headerPrimaryText,
                     fontSize: 15,

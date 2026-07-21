@@ -17,12 +17,26 @@ import '../models/review_entry.dart';
 /// because scoring points at the Storage path of an existing profile
 /// photo rather than a separate upload.
 class ProfilePhoto {
-  const ProfilePhoto({required this.url, required this.storagePath});
+  const ProfilePhoto({
+    required this.url,
+    required this.storagePath,
+    this.category = '',
+  });
 
   final String url;
   final String storagePath;
 
-  Map<String, dynamic> toMap() => {'url': url, 'storagePath': storagePath};
+  /// '' (untagged), 'hobby', or 'food' — at most one photo per category,
+  /// enforced by EditProfileScreen's tagging UI. Surfaced to other users as
+  /// hobbyPhotoUrl/foodPhotoUrl on ProfileExtras (see summarizeUserDoc in
+  /// functions/index.js).
+  final String category;
+
+  Map<String, dynamic> toMap() => {
+    'url': url,
+    'storagePath': storagePath,
+    'category': category,
+  };
 }
 
 class PhoneVerificationSession {
@@ -138,7 +152,10 @@ abstract class AuthController extends ChangeNotifier {
 
   Stream<List<ChatMessageEntry>> watchMessages(String connectionId);
 
-  Future<void> sendMessage({required String connectionId, required String text});
+  Future<void> sendMessage({
+    required String connectionId,
+    required String text,
+  });
 
   /// Double-tap-to-heart a message, iMessage-tapback style. addReaction
   /// true hearts it (adds the caller's uid), false un-hearts it.
@@ -487,10 +504,7 @@ class FirebaseAuthController extends AuthController {
     final rawMatches = result.data['matches'];
     if (rawMatches is! List) return const [];
 
-    return rawMatches
-        .whereType<Map>()
-        .map(MatchConnection.fromMap)
-        .toList();
+    return rawMatches.whereType<Map>().map(MatchConnection.fromMap).toList();
   }
 
   @override
@@ -509,7 +523,9 @@ class FirebaseAuthController extends AuthController {
                   senderId: (doc.data()['senderId'] ?? '').toString(),
                   text: (doc.data()['text'] ?? '').toString(),
                   sentAt: (doc.data()['sentAt'] as Timestamp?)?.toDate(),
-                  heartedByUids: List<String>.from(doc.data()['heartedByUids'] ?? const []),
+                  heartedByUids: List<String>.from(
+                    doc.data()['heartedByUids'] ?? const [],
+                  ),
                 ),
               )
               .toList(),
@@ -553,8 +569,9 @@ class FirebaseAuthController extends AuthController {
         .collection('messages')
         .doc(messageId)
         .update({
-          'heartedByUids':
-              addReaction ? FieldValue.arrayUnion([uid]) : FieldValue.arrayRemove([uid]),
+          'heartedByUids': addReaction
+              ? FieldValue.arrayUnion([uid])
+              : FieldValue.arrayRemove([uid]),
         });
   }
 
@@ -582,7 +599,10 @@ class FirebaseAuthController extends AuthController {
   }
 
   @override
-  Future<void> updateLocation({required double lat, required double lng}) async {
+  Future<void> updateLocation({
+    required double lat,
+    required double lng,
+  }) async {
     final callable = _functions.httpsCallable('updateLocation');
     await callable.call<Map<String, dynamic>>({'lat': lat, 'lng': lng});
   }

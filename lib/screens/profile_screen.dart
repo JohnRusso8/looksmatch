@@ -149,6 +149,43 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 ),
               ),
+              const SizedBox(height: 6),
+              Center(
+                child: GestureDetector(
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => PreferencesScreen(
+                        auth: auth,
+                        profileCache: widget.profileCache,
+                      ),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.location_on_outlined,
+                        size: 14,
+                        color: colors.accent,
+                      ),
+                      const SizedBox(width: 3),
+                      Text(
+                        widget.profileCache.details.city.isNotEmpty &&
+                                widget.profileCache.details.state != null
+                            ? '${widget.profileCache.details.city}, '
+                                  '${widget.profileCache.details.state}'
+                            : 'Set your location',
+                        style: TextStyle(
+                          color: colors.accent,
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
               const SizedBox(height: 4),
               Center(
                 child: Text(

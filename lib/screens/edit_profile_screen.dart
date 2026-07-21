@@ -15,11 +15,16 @@ import 'prompt_edit_screen.dart';
 /// uploaded photo (has a URL + storagePath) or a freshly picked one still
 /// waiting to be uploaded on save (has a local File).
 class _PhotoSlot {
-  _PhotoSlot.existing(this.photo) : file = null;
-  _PhotoSlot.newFile(this.file) : photo = null;
+  _PhotoSlot.existing(this.photo) : file = null, category = photo!.category;
+  _PhotoSlot.newFile(this.file) : photo = null, category = '';
 
   final ProfilePhoto? photo;
   final File? file;
+
+  /// '' (untagged), 'hobby', or 'food' — mutable so the tag picker can
+  /// update it in place without rebuilding the whole slot list. At most one
+  /// slot may hold each non-empty value; see _setCategory.
+  String category;
 
   bool get isExisting => photo != null;
 }
@@ -59,9 +64,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   List<String> _values = [];
   List<String> _musicGenres = [];
   List<String> _favoriteFoods = [];
-  String? _ethnicity;
+  List<String> _ethnicities = [];
   String? _relationshipType;
-  String? _datingIntention;
+  List<String> _datingIntentions = [];
   String? _drinking;
   String? _smoking;
   String? _educationLevel;
@@ -145,9 +150,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _values = List.of(details.values);
     _musicGenres = List.of(details.musicGenres);
     _favoriteFoods = List.of(details.favoriteFoods);
-    _ethnicity = details.ethnicity;
+    _ethnicities = List.of(details.ethnicities);
     _relationshipType = details.relationshipType;
-    _datingIntention = details.datingIntention;
+    _datingIntentions = List.of(details.datingIntentions);
     _drinking = details.drinking;
     _smoking = details.smoking;
     _educationLevel = details.educationLevel;
@@ -216,12 +221,20 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
 
   static const int _maxMultiSelect = 10;
+  // Ethnicity/dating intentions have far fewer, more mutually-exclusive-ish
+  // options than interests/values — a lower cap keeps the selection
+  // meaningful instead of letting someone pick nearly every option.
+  static const int _maxTraitMultiSelect = 3;
 
-  void _toggleInList(List<String> list, String value) {
+  void _toggleInList(
+    List<String> list,
+    String value, {
+    int max = _maxMultiSelect,
+  }) {
     setState(() {
       if (list.contains(value)) {
         list.remove(value);
-      } else if (list.length < _maxMultiSelect) {
+      } else if (list.length < max) {
         list.add(value);
       }
     });
@@ -270,6 +283,128 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       _removedStoragePaths.add(slot.photo!.storagePath);
     }
     setState(() => _slots.removeAt(index));
+  }
+
+  // At most one photo per non-empty category — setting one clears it from
+  // whichever other slot previously held it, mirroring how EditProfileScreen
+  // treats every other single-value field.
+  void _setCategory(int index, String category) {
+    setState(() {
+      if (category.isNotEmpty) {
+        for (final slot in _slots) {
+          if (slot.category == category) slot.category = '';
+        }
+      }
+      _slots[index].category = category;
+    });
+  }
+
+  Future<void> _pickPhotoTag(int index) async {
+    final colors = context.colors;
+    final current = _slots[index].category;
+
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) => Container(
+        decoration: BoxDecoration(
+          color: colors.pageBackground,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 12),
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: colors.divider,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Text(
+                  'Tag this photo',
+                  style: TextStyle(
+                    color: colors.headerPrimaryText,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Text(
+                  'Tagged photos get called out on your profile — one per tag.',
+                  style: TextStyle(
+                    color: colors.headerSecondaryText,
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              ListTile(
+                leading: Icon(Icons.hiking_rounded, color: colors.accent),
+                title: Text(
+                  'Doing a hobby',
+                  style: TextStyle(
+                    color: colors.headerPrimaryText,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                trailing: current == 'hobby'
+                    ? Icon(Icons.check_rounded, color: colors.accent)
+                    : null,
+                onTap: () => Navigator.pop(sheetContext, 'hobby'),
+              ),
+              ListTile(
+                leading: Icon(Icons.restaurant_rounded, color: colors.accent),
+                title: Text(
+                  'Food',
+                  style: TextStyle(
+                    color: colors.headerPrimaryText,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                trailing: current == 'food'
+                    ? Icon(Icons.check_rounded, color: colors.accent)
+                    : null,
+                onTap: () => Navigator.pop(sheetContext, 'food'),
+              ),
+              if (current.isNotEmpty)
+                ListTile(
+                  leading: Icon(
+                    Icons.close_rounded,
+                    color: colors.headerSecondaryText,
+                  ),
+                  title: Text(
+                    'Remove tag',
+                    style: TextStyle(
+                      color: colors.headerSecondaryText,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  onTap: () => Navigator.pop(sheetContext, ''),
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (selected == null || !mounted) return;
+    // Tapping the already-selected option is treated as "no change" rather
+    // than clearing it — only the explicit "Remove tag" row clears.
+    if (selected == current) return;
+    _setCategory(index, selected);
   }
 
   Future<void> _chooseBirthDate() async {
@@ -333,13 +468,25 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     setState(() => _submitting = true);
 
     try {
-      final uploaded = await Future.wait(
+      final uploadedRaw = await Future.wait(
         _slots.map(
           (slot) => slot.isExisting
               ? Future.value(slot.photo!)
               : widget.auth.uploadProfilePhoto(slot.file!),
         ),
       );
+      // uploadProfilePhoto returns a category-less ProfilePhoto (it doesn't
+      // know about tagging), and an existing slot's stored category may
+      // have changed this session — apply each slot's current category
+      // in both cases rather than trusting what was already on the object.
+      final uploaded = [
+        for (var i = 0; i < uploadedRaw.length; i++)
+          ProfilePhoto(
+            url: uploadedRaw[i].url,
+            storagePath: uploadedRaw[i].storagePath,
+            category: _slots[i].category,
+          ),
+      ];
 
       await widget.auth.saveProfile(
         name: _nameController.text,
@@ -370,9 +517,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           values: _values,
           musicGenres: _musicGenres,
           favoriteFoods: _favoriteFoods,
-          ethnicity: _ethnicity,
+          ethnicities: _ethnicities,
           relationshipType: _relationshipType,
-          datingIntention: _datingIntention,
+          datingIntentions: _datingIntentions,
           heightInches: heightInches,
           drinking: _drinking,
           smoking: _smoking,
@@ -690,13 +837,15 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   onToggle: (v) => _toggleInList(_favoriteFoods, v),
                 ),
                 const SizedBox(height: 20),
-                _choiceSection(
+                _multiChoiceSection(
                   colors: colors,
                   label: 'Ethnicity',
                   fieldKey: 'ethnicity',
+                  subtitle: 'Choose up to $_maxTraitMultiSelect.',
                   options: kEthnicityOptions,
-                  value: _ethnicity,
-                  onChanged: (v) => setState(() => _ethnicity = v),
+                  selected: _ethnicities,
+                  onToggle: (v) =>
+                      _toggleInList(_ethnicities, v, max: _maxTraitMultiSelect),
                 ),
                 const SizedBox(height: 20),
                 _choiceSection(
@@ -708,13 +857,18 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   onChanged: (v) => setState(() => _relationshipType = v),
                 ),
                 const SizedBox(height: 20),
-                _choiceSection(
+                _multiChoiceSection(
                   colors: colors,
                   label: 'Dating intentions',
                   fieldKey: 'datingIntention',
+                  subtitle: 'Choose up to $_maxTraitMultiSelect.',
                   options: kDatingIntentionOptions,
-                  value: _datingIntention,
-                  onChanged: (v) => setState(() => _datingIntention = v),
+                  selected: _datingIntentions,
+                  onToggle: (v) => _toggleInList(
+                    _datingIntentions,
+                    v,
+                    max: _maxTraitMultiSelect,
+                  ),
                 ),
                 const SizedBox(height: 20),
                 _sectionHeader(colors, 'Height', 'height'),
@@ -1159,6 +1313,45 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   Icons.close_rounded,
                   color: Colors.white,
                   size: 16,
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            left: 6,
+            bottom: 6,
+            child: GestureDetector(
+              onTap: () => _pickPhotoTag(index),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.55),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      switch (slot.category) {
+                        'hobby' => Icons.hiking_rounded,
+                        'food' => Icons.restaurant_rounded,
+                        _ => Icons.local_offer_outlined,
+                      },
+                      color: Colors.white,
+                      size: 13,
+                    ),
+                    if (slot.category.isNotEmpty) ...[
+                      const SizedBox(width: 4),
+                      Text(
+                        slot.category == 'hobby' ? 'Hobby' : 'Food',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ),
             ),

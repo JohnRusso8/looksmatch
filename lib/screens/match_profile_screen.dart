@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/discover_candidate.dart';
 import '../models/profile_extras.dart';
 import '../services/auth_controller.dart';
+import '../services/profile_cache.dart';
 import '../theme/app_theme.dart';
 import '../widgets/network_avatar.dart';
 
@@ -23,75 +24,207 @@ void _showSnack(BuildContext context, String message) {
     ..showSnackBar(
       SnackBar(
         behavior: SnackBarBehavior.floating,
-        content: Text(message, style: const TextStyle(fontWeight: FontWeight.w700)),
+        content: Text(
+          message,
+          style: const TextStyle(fontWeight: FontWeight.w700),
+        ),
       ),
     );
 }
 
-class _Trait {
-  const _Trait(this.icon, this.label);
+/// A single fact for the horizontal stat strip just under the photo —
+/// LooksMatch's own take on the "basics" row every dating app shows, styled
+/// as small vertical cards rather than a plain scrolling list.
+class _StatItem {
+  const _StatItem(this.icon, this.label);
 
   final IconData icon;
   final String label;
 }
 
-Widget _chipList(LooksMatchColors colors, IconData icon, List<String> items) {
-  if (items.isEmpty) return const SizedBox.shrink();
-
-  return Padding(
-    padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-    child: Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: items
-          .map((item) => _TraitChip(colors: colors, trait: _Trait(icon, item)))
-          .toList(),
-    ),
-  );
-}
-
-List<_Trait> _traits(ProfileExtras extras) {
+List<_StatItem> _statItems(ProfileExtras extras) {
   return [
-    if (extras.ethnicity != null) _Trait(Icons.public_rounded, extras.ethnicity!),
-    if (extras.relationshipType != null)
-      _Trait(Icons.favorite_border_rounded, extras.relationshipType!),
-    if (extras.datingIntention != null)
-      _Trait(Icons.explore_outlined, extras.datingIntention!),
     if (extras.heightInches != null)
-      _Trait(Icons.height_rounded, extras.heightLabel),
-    if (extras.drinking != null) _Trait(Icons.local_bar_outlined, 'Drinks: ${extras.drinking}'),
-    if (extras.smoking != null) _Trait(Icons.smoking_rooms_outlined, 'Smokes: ${extras.smoking}'),
+      _StatItem(Icons.height_rounded, extras.heightLabel),
+    if (extras.relationshipType != null)
+      _StatItem(Icons.favorite_border_rounded, extras.relationshipType!),
+    ...extras.datingIntentions.map(
+      (intention) => _StatItem(Icons.explore_outlined, intention),
+    ),
+    ...extras.ethnicities.map(
+      (ethnicity) => _StatItem(Icons.public_rounded, ethnicity),
+    ),
     if (extras.educationLevel != null)
-      _Trait(Icons.school_outlined, extras.educationLevel!),
+      _StatItem(Icons.school_outlined, extras.educationLevel!),
     if (extras.college?.isNotEmpty ?? false)
-      _Trait(Icons.account_balance_outlined, extras.college!),
+      _StatItem(Icons.account_balance_outlined, extras.college!),
+    if (extras.drinking != null)
+      _StatItem(Icons.local_bar_outlined, extras.drinking!),
+    if (extras.smoking != null)
+      _StatItem(Icons.smoking_rooms_outlined, extras.smoking!),
   ];
 }
 
-class _TraitChip extends StatelessWidget {
-  const _TraitChip({required this.colors, required this.trait});
+class _StatStrip extends StatelessWidget {
+  const _StatStrip({required this.colors, required this.items});
 
   final LooksMatchColors colors;
-  final _Trait trait;
+  final List<_StatItem> items;
 
   @override
   Widget build(BuildContext context) {
+    if (items.isEmpty) return const SizedBox.shrink();
+
+    return SizedBox(
+      height: 94,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+        itemCount: items.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 10),
+        itemBuilder: (context, index) {
+          final item = items[index];
+          return Container(
+            width: 82,
+            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
+            decoration: BoxDecoration(
+              color: colors.scoreBackground,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: colors.accent.withOpacity(0.22)),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(item.icon, color: colors.accent, size: 20),
+                const SizedBox(height: 8),
+                Text(
+                  item.label,
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: colors.headerPrimaryText,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    height: 1.2,
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// A single chip within one interests/values/music/food category. `matched`
+/// means the viewer's own profile has this same item — those chips render
+/// filled instead of outlined so shared ground stands out at a glance.
+class _InfoChip {
+  const _InfoChip(this.label, {required this.matched});
+
+  final String label;
+  final bool matched;
+}
+
+List<_InfoChip> _categoryChips(List<String> theirs, List<String> mine) {
+  final mineSet = mine.map((i) => i.toLowerCase()).toSet();
+  return theirs
+      .map(
+        (item) =>
+            _InfoChip(item, matched: mineSet.contains(item.toLowerCase())),
+      )
+      .toList();
+}
+
+/// One category's worth of chips — a small caption label above its own
+/// Wrap, rather than every category dumped into one undifferentiated pile.
+class _InfoCategorySection extends StatelessWidget {
+  const _InfoCategorySection({
+    required this.colors,
+    required this.label,
+    required this.icon,
+    required this.chips,
+  });
+
+  final LooksMatchColors colors;
+  final String label;
+  final IconData icon;
+  final List<_InfoChip> chips;
+
+  @override
+  Widget build(BuildContext context) {
+    if (chips.isEmpty) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: colors.headerSecondaryText,
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.3,
+            ),
+          ),
+          const SizedBox(height: 9),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: chips
+                .map(
+                  (chip) =>
+                      _InfoChipPill(colors: colors, icon: icon, chip: chip),
+                )
+                .toList(),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _InfoChipPill extends StatelessWidget {
+  const _InfoChipPill({
+    required this.colors,
+    required this.icon,
+    required this.chip,
+  });
+
+  final LooksMatchColors colors;
+  final IconData icon;
+  final _InfoChip chip;
+
+  @override
+  Widget build(BuildContext context) {
+    final matched = chip.matched;
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
       decoration: BoxDecoration(
-        color: colors.chipUnselectedBackground,
+        color: matched ? colors.accent : colors.chipUnselectedBackground,
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: colors.chipBorder),
+        border: Border.all(color: matched ? colors.accent : colors.chipBorder),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(trait.icon, size: 15, color: colors.accent),
+          Icon(
+            icon,
+            size: 15,
+            color: matched ? colors.primaryButtonText : colors.accent,
+          ),
           const SizedBox(width: 6),
           Text(
-            trait.label,
+            chip.label,
             style: TextStyle(
-              color: colors.chipUnselectedText,
+              color: matched
+                  ? colors.primaryButtonText
+                  : colors.chipUnselectedText,
               fontSize: 12.5,
               fontWeight: FontWeight.w700,
             ),
@@ -102,23 +235,96 @@ class _TraitChip extends StatelessWidget {
   }
 }
 
+/// A tagged "hobby" or "food" photo, called out as its own small card
+/// (Pinterest-style visual variety) instead of just blending into the main
+/// photo gallery like every other photo.
+class _MomentCard extends StatelessWidget {
+  const _MomentCard({
+    required this.colors,
+    required this.url,
+    required this.icon,
+    required this.label,
+  });
+
+  final LooksMatchColors colors;
+  final String url;
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: AspectRatio(
+        aspectRatio: 1,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            NetworkPhoto(url: url),
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(10, 22, 10, 10),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.transparent,
+                      Colors.black.withOpacity(0.68),
+                    ],
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(icon, color: Colors.white, size: 14),
+                    const SizedBox(width: 5),
+                    Text(
+                      label,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class MatchProfileScreen extends StatelessWidget {
   const MatchProfileScreen({
     super.key,
     required this.auth,
     required this.candidate,
+    required this.profileCache,
     this.onConnect,
     this.onPass,
   });
 
   final AuthController auth;
   final DiscoverCandidate candidate;
+
+  /// The viewer's own profile — used only to highlight which of the
+  /// candidate's interests/values/music/food overlap with the viewer's own,
+  /// never mutated here.
+  final ProfileCache profileCache;
   final VoidCallback? onConnect;
   final VoidCallback? onPass;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
+    final myDetails = profileCache.details;
 
     return Scaffold(
       backgroundColor: colors.pageBackground,
@@ -149,57 +355,93 @@ class MatchProfileScreen extends StatelessWidget {
             aspectRatio: 4 / 5,
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-              child: _PhotoGallery(
-                urls: candidate.photoUrls.isNotEmpty
-                    ? candidate.photoUrls
-                    : [candidate.primaryPhotoUrl],
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(24),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    _PhotoGallery(
+                      urls: candidate.photoUrls.isNotEmpty
+                          ? candidate.photoUrls
+                          : [candidate.primaryPhotoUrl],
+                    ),
+                    // IgnorePointer so this purely-informational overlay
+                    // never steals the swipe gesture from the gallery
+                    // underneath it.
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: IgnorePointer(
+                        child: Container(
+                          padding: const EdgeInsets.fromLTRB(18, 46, 18, 18),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                Colors.transparent,
+                                Colors.black.withOpacity(0.75),
+                              ],
+                            ),
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  candidate.age == null
+                                      ? candidate.name
+                                      : '${candidate.name}, ${candidate.age}',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 26,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                              ),
+                              if (candidate.extras.distanceMiles != null)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 6,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withOpacity(0.2),
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(
+                                        Icons.location_on_outlined,
+                                        size: 14,
+                                        color: Colors.white,
+                                      ),
+                                      const SizedBox(width: 3),
+                                      Text(
+                                        '${candidate.extras.distanceMiles} mi',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
-          Container(
-            margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: colors.cardBackground,
-              borderRadius: BorderRadius.circular(22),
-              border: Border.all(color: colors.cardBorder),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    candidate.age == null
-                        ? candidate.name
-                        : '${candidate.name}, ${candidate.age}',
-                    style: TextStyle(
-                      color: colors.headerPrimaryText,
-                      fontSize: 24,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                ),
-                if (candidate.extras.distanceMiles != null)
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.location_on_outlined,
-                        size: 16,
-                        color: colors.headerSecondaryText,
-                      ),
-                      const SizedBox(width: 3),
-                      Text(
-                        '${candidate.extras.distanceMiles} mi',
-                        style: TextStyle(
-                          color: colors.headerSecondaryText,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ),
-              ],
-            ),
-          ),
+          const SizedBox(height: 14),
+          _StatStrip(colors: colors, items: _statItems(candidate.extras)),
           if (candidate.extras.compatibilityPercent != null)
             Container(
               margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
@@ -260,39 +502,81 @@ class MatchProfileScreen extends StatelessWidget {
               ),
             ),
           if (candidate.extras.bio.isNotEmpty)
-            Container(
-              margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: colors.cardBackground,
-                borderRadius: BorderRadius.circular(22),
-                border: Border.all(color: colors.cardBorder),
-              ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
               child: Text(
                 candidate.extras.bio,
                 style: TextStyle(
                   color: colors.headerPrimaryText,
-                  fontSize: 14.5,
-                  height: 1.45,
+                  fontSize: 15,
+                  height: 1.5,
                   fontWeight: FontWeight.w600,
                 ),
               ),
             ),
-          _chipList(colors, Icons.star_border_rounded, candidate.extras.interests),
-          _chipList(colors, Icons.emoji_objects_outlined, candidate.extras.values),
-          _chipList(colors, Icons.music_note_rounded, candidate.extras.musicGenres),
-          _chipList(colors, Icons.restaurant_outlined, candidate.extras.favoriteFoods),
-          if (_traits(candidate.extras).isNotEmpty)
+          if (candidate.extras.hobbyPhotoUrl != null ||
+              candidate.extras.foodPhotoUrl != null)
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: _traits(candidate.extras)
-                    .map((trait) => _TraitChip(colors: colors, trait: trait))
-                    .toList(),
+              padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),
+              child: Row(
+                children: [
+                  if (candidate.extras.hobbyPhotoUrl != null)
+                    Expanded(
+                      child: _MomentCard(
+                        colors: colors,
+                        url: candidate.extras.hobbyPhotoUrl!,
+                        icon: Icons.hiking_rounded,
+                        label: 'Hobby',
+                      ),
+                    ),
+                  if (candidate.extras.hobbyPhotoUrl != null &&
+                      candidate.extras.foodPhotoUrl != null)
+                    const SizedBox(width: 12),
+                  if (candidate.extras.foodPhotoUrl != null)
+                    Expanded(
+                      child: _MomentCard(
+                        colors: colors,
+                        url: candidate.extras.foodPhotoUrl!,
+                        icon: Icons.restaurant_rounded,
+                        label: 'Food',
+                      ),
+                    ),
+                ],
               ),
             ),
+          _InfoCategorySection(
+            colors: colors,
+            label: 'Interests',
+            icon: Icons.star_border_rounded,
+            chips: _categoryChips(
+              candidate.extras.interests,
+              myDetails.interests,
+            ),
+          ),
+          _InfoCategorySection(
+            colors: colors,
+            label: 'Values',
+            icon: Icons.emoji_objects_outlined,
+            chips: _categoryChips(candidate.extras.values, myDetails.values),
+          ),
+          _InfoCategorySection(
+            colors: colors,
+            label: 'Music',
+            icon: Icons.music_note_rounded,
+            chips: _categoryChips(
+              candidate.extras.musicGenres,
+              myDetails.musicGenres,
+            ),
+          ),
+          _InfoCategorySection(
+            colors: colors,
+            label: 'Food',
+            icon: Icons.restaurant_outlined,
+            chips: _categoryChips(
+              candidate.extras.favoriteFoods,
+              myDetails.favoriteFoods,
+            ),
+          ),
           ...candidate.extras.prompts.map(
             (prompt) => Container(
               margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
@@ -355,7 +639,9 @@ class MatchProfileScreen extends StatelessWidget {
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(14),
                           ),
-                          textStyle: const TextStyle(fontWeight: FontWeight.w900),
+                          textStyle: const TextStyle(
+                            fontWeight: FontWeight.w900,
+                          ),
                         ),
                       ),
                     ),
@@ -377,7 +663,9 @@ class MatchProfileScreen extends StatelessWidget {
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(14),
                           ),
-                          textStyle: const TextStyle(fontWeight: FontWeight.w900),
+                          textStyle: const TextStyle(
+                            fontWeight: FontWeight.w900,
+                          ),
                         ),
                       ),
                     ),
@@ -415,7 +703,10 @@ class MatchProfileScreen extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               ListTile(
-                leading: Icon(Icons.flag_outlined, color: colors.headerPrimaryText),
+                leading: Icon(
+                  Icons.flag_outlined,
+                  color: colors.headerPrimaryText,
+                ),
                 title: Text(
                   'Report ${candidate.name}',
                   style: TextStyle(
@@ -426,7 +717,10 @@ class MatchProfileScreen extends StatelessWidget {
                 onTap: () => Navigator.pop(sheetContext, 'report'),
               ),
               ListTile(
-                leading: Icon(Icons.block_rounded, color: colors.deleteBackground),
+                leading: Icon(
+                  Icons.block_rounded,
+                  color: colors.deleteBackground,
+                ),
                 title: Text(
                   'Block ${candidate.name}',
                   style: TextStyle(
@@ -520,7 +814,10 @@ class MatchProfileScreen extends StatelessWidget {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         title: Text(
           'Report ${candidate.name}?',
-          style: TextStyle(color: colors.headerPrimaryText, fontWeight: FontWeight.w900),
+          style: TextStyle(
+            color: colors.headerPrimaryText,
+            fontWeight: FontWeight.w900,
+          ),
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -528,7 +825,10 @@ class MatchProfileScreen extends StatelessWidget {
           children: [
             Text(
               'Reason: $reason',
-              style: TextStyle(color: colors.headerSecondaryText, fontWeight: FontWeight.w700),
+              style: TextStyle(
+                color: colors.headerSecondaryText,
+                fontWeight: FontWeight.w700,
+              ),
             ),
             const SizedBox(height: 12),
             TextField(
@@ -554,14 +854,20 @@ class MatchProfileScreen extends StatelessWidget {
             onPressed: () => Navigator.pop(dialogContext, false),
             child: Text(
               'Cancel',
-              style: TextStyle(color: colors.headerSecondaryText, fontWeight: FontWeight.w800),
+              style: TextStyle(
+                color: colors.headerSecondaryText,
+                fontWeight: FontWeight.w800,
+              ),
             ),
           ),
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, true),
             child: Text(
               'Submit Report',
-              style: TextStyle(color: colors.deleteBackground, fontWeight: FontWeight.w900),
+              style: TextStyle(
+                color: colors.deleteBackground,
+                fontWeight: FontWeight.w900,
+              ),
             ),
           ),
         ],
@@ -595,7 +901,10 @@ class MatchProfileScreen extends StatelessWidget {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         title: Text(
           'Block ${candidate.name}?',
-          style: TextStyle(color: colors.headerPrimaryText, fontWeight: FontWeight.w900),
+          style: TextStyle(
+            color: colors.headerPrimaryText,
+            fontWeight: FontWeight.w900,
+          ),
         ),
         content: Text(
           'You won\'t see each other in Discover, Likes, or Matches anymore.',
@@ -610,14 +919,20 @@ class MatchProfileScreen extends StatelessWidget {
             onPressed: () => Navigator.pop(dialogContext, false),
             child: Text(
               'Cancel',
-              style: TextStyle(color: colors.headerSecondaryText, fontWeight: FontWeight.w800),
+              style: TextStyle(
+                color: colors.headerSecondaryText,
+                fontWeight: FontWeight.w800,
+              ),
             ),
           ),
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, true),
             child: Text(
               'Block',
-              style: TextStyle(color: colors.deleteBackground, fontWeight: FontWeight.w900),
+              style: TextStyle(
+                color: colors.deleteBackground,
+                fontWeight: FontWeight.w900,
+              ),
             ),
           ),
         ],

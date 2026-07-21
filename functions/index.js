@@ -30,14 +30,20 @@ const MODEL_NAME = 'gemini-flash-lite-latest';
 // Gemini cost.
 const SAMPLES_PER_PHOTO = 1;
 
-const SCORING_VERSION = 'v3-profile-photo-scoring';
+const SCORING_VERSION = 'v4-analytical-harsh-scoring';
 const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
 
 // Rekognition validation thresholds — all tunable. Deliberately not using
 // Rekognition's Gender or AgeRange attributes anywhere in this file: only
 // structural/quality attributes (pose, sharpness, brightness, occlusion)
 // feed into validation, and none of them feed into the score at all.
-const MIN_SHARPNESS = 40;
+// Rekognition's Sharpness score is a blur-detection heuristic, not a true
+// focus check — it's known to under-score genuinely in-focus photos that
+// have smooth, low-texture skin or flat lighting, since it likely reads
+// local contrast/edges as its blur signal. 40 was rejecting real, clearly
+// sharp phone photos as "blurry"; keep this loose enough to only catch
+// actual motion blur, not just low local-contrast lighting.
+const MIN_SHARPNESS = 15;
 const MIN_BRIGHTNESS = 30;
 const MAX_BRIGHTNESS = 90;
 const MAX_POSE_DEGREES = 30;
@@ -68,15 +74,57 @@ const SCORE_SCHEMA = {
 };
 
 const RUBRIC_PROMPT = `
-You are scoring a single standardized photo submitted to a dating app's
-photo-compatibility feature. This photo has already been validated as a
-clear, unobstructed, forward-facing single face — do not re-validate it.
+You are a clinical facial-aesthetics analyst scoring a single standardized
+photo submitted to a dating app's photo-compatibility feature. This photo
+has already been validated as a clear, unobstructed, forward-facing single
+face — do not re-validate it.
 
-Score the photo from 1 to 100 based only on: facial symmetry and
-proportion, photo clarity, lighting and composition, and expression. Apply
-the exact same standard to every photo regardless of the person's race,
-ethnicity, skin tone, gender, or age — none of those attributes should
-raise or lower the score.
+Be rigorous and critical, not encouraging. This is a structural analysis,
+not a compliment. Most faces are ordinary and should score in the ordinary
+range — do not inflate scores out of generosity or to soften the result.
+Real flaws (asymmetry, disproportion, weak structure) must pull the score
+down accordingly, and no single strong feature should mask weaknesses
+elsewhere.
+
+Analyze the face across these dimensions, weighted roughly equally, then
+integrate them into one overall judgment of facial harmony:
+
+- Symmetry: compare left and right sides — alignment of eyes, eyebrows,
+  ears, and mouth corners; any visible tilt or asymmetry in the jaw or
+  nose.
+- Proportion and balance: vertical thirds (hairline-to-brow,
+  brow-to-nose-base, nose-base-to-chin should read as roughly even) and
+  horizontal fifths (eye spacing relative to face width).
+- Jawline: definition and angularity of the mandible, sharpness of the
+  gonial angle, and how distinctly the jaw separates from the neck.
+- Nose: size and width relative to eye spacing and overall face width,
+  straightness of the bridge, and refinement of the tip — judged as a
+  proportion problem, not against any single ideal nose shape.
+- Cheekbones: prominence, height, and how much structure they give the
+  midface.
+- Eyes: shape, spacing, and left-right symmetry.
+- Skin: clarity, evenness, and texture as visible in the photo only.
+
+Facial structure (symmetry, proportion, jawline, nose, cheekbones, eyes)
+should dominate the score. Photo clarity, lighting, composition, and
+expression are secondary modifiers only — a great photo of an ordinary
+face should not outscore a strong face in a mediocre photo.
+
+Symmetry and proportion are geometric properties of an individual's own
+face, evaluated relative to that face — not against a single ethnic or
+cultural beauty ideal. Apply the exact same standard to every photo
+regardless of the person's race, ethnicity, skin tone, gender, or age;
+none of those attributes should raise or lower the score, and structural
+variation that's typical across different ancestries is not itself a
+flaw.
+
+Calibrate against the full 1-100 range: 50 is a typical face with no
+notable asymmetry or disproportion and no distinguishing structure either
+way. Below 40 reflects visible asymmetry, disproportion, or weak
+definition. Above 75 requires strong symmetry, balanced proportion, and
+clear structural definition across most dimensions above, not just one.
+Reserve 90+ for exceptional harmony across nearly every dimension with no
+notable flaws — this should be rare.
 
 Set confidence (0 to 1) to how certain you are in the score itself.
 
@@ -123,12 +171,22 @@ async function validateWithRekognition(rekognitionClient, buffer) {
     return {valid: false, reason: 'eyes_closed'};
   }
 
-  if ((face.Quality?.Sharpness ?? 0) < MIN_SHARPNESS) {
+  const sharpness = face.Quality?.Sharpness ?? 0;
+  const brightness = face.Quality?.Brightness ?? 0;
+
+  if (sharpness < MIN_SHARPNESS) {
+    console.log(
+      `validateWithRekognition low_quality: sharpness=${sharpness} ` +
+        `(min ${MIN_SHARPNESS}), brightness=${brightness}`,
+    );
     return {valid: false, reason: 'low_quality'};
   }
 
-  const brightness = face.Quality?.Brightness ?? 0;
   if (brightness < MIN_BRIGHTNESS || brightness > MAX_BRIGHTNESS) {
+    console.log(
+      `validateWithRekognition low_quality: brightness=${brightness} ` +
+        `(range ${MIN_BRIGHTNESS}-${MAX_BRIGHTNESS}), sharpness=${sharpness}`,
+    );
     return {valid: false, reason: 'low_quality'};
   }
 
@@ -380,12 +438,19 @@ function summarizeUserDoc(doc) {
   const photos = Array.isArray(data.photos) ? data.photos : [];
   const photoUrls = photos.map((photo) => (photo.url || '').toString()).filter(Boolean);
 
+  // At most one photo per category — EditProfileScreen enforces this
+  // client-side when tagging, so `find` picking the first match is enough.
+  const hobbyPhoto = photos.find((photo) => photo.category === 'hobby');
+  const foodPhoto = photos.find((photo) => photo.category === 'food');
+
   return {
     uid: doc.id,
     name: (data.name || '').toString(),
     age: calculateAge(data.birthDate),
     primaryPhotoUrl: photoUrls.length > 0 ? photoUrls[0] : '',
     photoUrls,
+    hobbyPhotoUrl: hobbyPhoto ? (hobbyPhoto.url || '').toString() : '',
+    foodPhotoUrl: foodPhoto ? (foodPhoto.url || '').toString() : '',
   };
 }
 
@@ -414,11 +479,9 @@ const DISPLAYABLE_PROFILE_FIELDS = [
 // excludes ethnicity (same anti-bias reasoning as keeping race out of the
 // looks score entirely) and anything that isn't really a "compatibility"
 // signal (height, college, bio). Multi-select fields (interests, values,
-// music, food) are scored separately below since they're sets, not single
-// values. The two groups are weighted 40/60 — shared lifestyle/taste
-// outweighs a handful of single-answer questions.
+// music, food, dating intentions) are scored separately below since
+// they're sets, not single values.
 const COMPATIBILITY_MATCH_WEIGHTS = {
-  datingIntention: 15,
   relationshipType: 10,
   drinking: 5,
   smoking: 5,
@@ -427,12 +490,15 @@ const COMPATIBILITY_MATCH_WEIGHTS = {
 
 // Each multi-select category contributes up to maxPoints, reached once
 // `cap` items are shared — further overlap beyond the cap doesn't add more,
-// so one person listing 20 interests can't dominate the score.
+// so one person listing 20 interests can't dominate the score. Dating
+// intentions gets a lower cap than the others since it only has ~7 options
+// total and picking most of them shouldn't be as easy to max out.
 const COMPATIBILITY_OVERLAP_CATEGORIES = {
   interests: {maxPoints: 15, cap: 4},
   values: {maxPoints: 15, cap: 4},
   musicGenres: {maxPoints: 15, cap: 4},
   favoriteFoods: {maxPoints: 15, cap: 4},
+  datingIntention: {maxPoints: 15, cap: 2},
 };
 
 function fieldMutuallyVisible(a, b, field) {
@@ -515,9 +581,23 @@ function matchesListPreference(preferred, candidateValue) {
   return preferred.includes(candidateValue);
 }
 
+// Same "no preference / unknown candidate value never excludes" rule as
+// matchesListPreference, but for a candidate field that's itself a list
+// (ethnicity, now multi-select) — matches if ANY of the candidate's values
+// is in the preferred list, rather than comparing a single scalar.
+function matchesAnyListPreference(preferred, candidateValues) {
+  if (!hasValue(preferred)) return true;
+  if (!hasValue(candidateValues)) return true;
+  // Tolerates a pre-multi-select single string still sitting on an
+  // untouched profile, same as the client's parseMultiOrLegacySingle.
+  const values = Array.isArray(candidateValues) ? candidateValues : [candidateValues];
+  const preferredSet = new Set(preferred);
+  return values.some((value) => preferredSet.has(value));
+}
+
 function matchesTraitPreferences(myDetails, candidateDetails) {
   if (
-    !matchesListPreference(
+    !matchesAnyListPreference(
       myDetails?.preferredEthnicities,
       candidateFieldIfVisible(candidateDetails, 'ethnicity'),
     )

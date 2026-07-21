@@ -61,6 +61,12 @@ Future<void> confirmSignOut({
 
   try {
     await onSignOut();
+    if (!context.mounted) return;
+    // Signing out swaps what AuthGate renders underneath (Welcome instead
+    // of HomeShell), but that alone doesn't clear whatever's been pushed
+    // on top of it (Settings, Preferences, etc.) — without this, the user
+    // stays stuck looking at the screen they signed out from.
+    Navigator.of(context).popUntil((route) => route.isFirst);
   } catch (error) {
     if (!context.mounted) return;
     ScaffoldMessenger.of(context)

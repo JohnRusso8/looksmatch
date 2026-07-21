@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/likes_and_matches.dart';
 import '../services/auth_controller.dart';
+import '../services/profile_cache.dart';
 import '../theme/app_theme.dart';
 import '../widgets/network_avatar.dart';
 import 'chat_screen.dart';
@@ -18,9 +19,15 @@ String _relativeTime(DateTime? value) {
 }
 
 class MatchesScreen extends StatefulWidget {
-  const MatchesScreen({super.key, required this.auth, this.refreshToken = 0});
+  const MatchesScreen({
+    super.key,
+    required this.auth,
+    required this.profileCache,
+    this.refreshToken = 0,
+  });
 
   final AuthController auth;
+  final ProfileCache profileCache;
 
   /// Bump this (e.g. from the host shell) to force a reload — used right
   /// after a fresh match so this tab shows it without needing a relaunch.
@@ -169,8 +176,11 @@ class _MatchesScreenState extends State<MatchesScreen> {
                     await Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) =>
-                            ChatScreen(auth: widget.auth, match: match),
+                        builder: (_) => ChatScreen(
+                          auth: widget.auth,
+                          profileCache: widget.profileCache,
+                          match: match,
+                        ),
                       ),
                     );
                     if (!mounted) return;
@@ -211,6 +221,7 @@ class _MatchesScreenState extends State<MatchesScreen> {
         ...others.map(
           (match) => _ConversationTile(
             auth: widget.auth,
+            profileCache: widget.profileCache,
             match: match,
             onOpened: _load,
           ),
@@ -223,11 +234,13 @@ class _MatchesScreenState extends State<MatchesScreen> {
 class _ConversationTile extends StatelessWidget {
   const _ConversationTile({
     required this.auth,
+    required this.profileCache,
     required this.match,
     required this.onOpened,
   });
 
   final AuthController auth;
+  final ProfileCache profileCache;
   final MatchConnection match;
   final VoidCallback onOpened;
 
@@ -240,7 +253,13 @@ class _ConversationTile extends StatelessWidget {
       onTap: () async {
         await Navigator.push(
           context,
-          MaterialPageRoute(builder: (_) => ChatScreen(auth: auth, match: match)),
+          MaterialPageRoute(
+            builder: (_) => ChatScreen(
+              auth: auth,
+              profileCache: profileCache,
+              match: match,
+            ),
+          ),
         );
         onOpened();
       },
