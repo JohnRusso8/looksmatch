@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:geocoding/geocoding.dart';
 
 import '../models/profile_details.dart';
 import '../services/auth_controller.dart';
 import '../services/profile_cache.dart';
 import '../theme/app_theme.dart';
+import '../widgets/location_autocomplete_field.dart';
 
 /// Match preferences — who shows up in Discover. Distinct from Edit
 /// Profile: everything here is a private filter about candidates, never
@@ -877,55 +877,9 @@ class _LocationPage extends StatefulWidget {
 }
 
 class _LocationPageState extends State<_LocationPage> {
-  late final _cityController = TextEditingController(text: widget.city);
+  late String _city = widget.city;
   late String? _state = widget.state;
-  bool _settingLocation = false;
-
-  @override
-  void dispose() {
-    _cityController.dispose();
-    super.dispose();
-  }
-
-  // Uses on-device forward geocoding (no location permission needed — this
-  // just resolves the typed city/state to coordinates, it never reads the
-  // device's actual position) so the distance shown to matches is based on
-  // wherever the user says they are, not GPS.
-  Future<void> _setLocation() async {
-    final city = _cityController.text.trim();
-    if (city.isEmpty || _state == null) {
-      _showMessage('Enter a city and state first.');
-      return;
-    }
-
-    setState(() => _settingLocation = true);
-    try {
-      final results = await Geocoding().locationFromAddress(
-        '$city, $_state, USA',
-      );
-      if (results.isEmpty) {
-        if (!mounted) return;
-        _showMessage(
-          'Could not find that city. Check the spelling and try again.',
-        );
-        return;
-      }
-
-      final location = results.first;
-      await widget.auth.updateLocation(
-        lat: location.latitude,
-        lng: location.longitude,
-      );
-
-      if (!mounted) return;
-      _showMessage('Location set to $city, $_state.');
-    } catch (error) {
-      if (!mounted) return;
-      _showMessage('Could not set your location. Please try again.');
-    } finally {
-      if (mounted) setState(() => _settingLocation = false);
-    }
-  }
+  bool _hasSelection = false;
 
   void _showMessage(String message) {
     ScaffoldMessenger.of(context)
@@ -947,10 +901,7 @@ class _LocationPageState extends State<_LocationPage> {
 
     return _DetailScaffold(
       title: 'Location',
-      onDone: () => Navigator.pop(
-        context,
-        _LocationResult(_cityController.text.trim(), _state),
-      ),
+      onDone: () => Navigator.pop(context, _LocationResult(_city, _state)),
       body: Padding(
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
         child: Column(
@@ -967,107 +918,49 @@ class _LocationPageState extends State<_LocationPage> {
               ),
             ),
             const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  flex: 2,
-                  child: TextFormField(
-                    controller: _cityController,
-                    textCapitalization: TextCapitalization.words,
+            LocationAutocompleteField(
+              auth: widget.auth,
+              initialCity: widget.city,
+              initialState: widget.state,
+              onSelected: (city, state, lat, lng) async {
+                try {
+                  await widget.auth.updateLocation(lat: lat, lng: lng);
+                  if (!mounted) return;
+                  setState(() {
+                    _city = city;
+                    _state = state;
+                    _hasSelection = true;
+                  });
+                  _showMessage('Location set to $city, $state.');
+                } catch (error) {
+                  if (!mounted) return;
+                  _showMessage(
+                    'Could not set your location. Please try again.',
+                  );
+                }
+              },
+            ),
+            if (_hasSelection) ...[
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Icon(
+                    Icons.check_circle_rounded,
+                    size: 16,
+                    color: colors.accent,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Set to $_city, $_state',
                     style: TextStyle(
-                      color: colors.headerPrimaryText,
-                      fontWeight: FontWeight.w700,
-                    ),
-                    decoration: InputDecoration(
-                      hintText: 'City',
-                      hintStyle: TextStyle(
-                        color: colors.inputHint,
-                        fontWeight: FontWeight.w600,
-                      ),
-                      filled: true,
-                      fillColor: colors.inputBackground,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 14,
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(15),
-                        borderSide: BorderSide(color: colors.inputBorder),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(15),
-                        borderSide: BorderSide(
-                          color: colors.accent,
-                          width: 1.5,
-                        ),
-                      ),
+                      color: colors.headerSecondaryText,
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: DropdownButtonFormField<String>(
-                    initialValue: _state,
-                    style: TextStyle(
-                      color: colors.headerPrimaryText,
-                      fontWeight: FontWeight.w700,
-                    ),
-                    dropdownColor: colors.cardBackground,
-                    decoration: InputDecoration(
-                      hintText: 'State',
-                      hintStyle: TextStyle(color: colors.inputHint),
-                      filled: true,
-                      fillColor: colors.inputBackground,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 14,
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(15),
-                        borderSide: BorderSide(color: colors.inputBorder),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(15),
-                        borderSide: BorderSide(
-                          color: colors.accent,
-                          width: 1.5,
-                        ),
-                      ),
-                    ),
-                    items: kUsStates
-                        .map((s) => DropdownMenuItem(value: s, child: Text(s)))
-                        .toList(),
-                    onChanged: (v) => setState(() => _state = v),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            OutlinedButton.icon(
-              onPressed: _settingLocation ? null : _setLocation,
-              icon: _settingLocation
-                  ? SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: colors.accent,
-                      ),
-                    )
-                  : const Icon(Icons.location_on_outlined),
-              label: Text(
-                _settingLocation ? 'Setting location...' : 'Set location',
+                ],
               ),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: colors.accent,
-                side: BorderSide(color: colors.accent.withOpacity(0.5)),
-                minimumSize: const Size.fromHeight(46),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                textStyle: const TextStyle(fontWeight: FontWeight.w800),
-              ),
-            ),
+            ],
           ],
         ),
       ),

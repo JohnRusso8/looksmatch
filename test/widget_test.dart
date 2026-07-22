@@ -134,6 +134,13 @@ class _FakeAuthController extends AuthController {
   }) async {}
 
   @override
+  Future<List<PlaceSuggestion>> placeAutocomplete(String input) async => [];
+
+  @override
+  Future<ResolvedPlace> placeDetails(String placeId) async =>
+      const ResolvedPlace(city: '', state: '', lat: 0, lng: 0);
+
+  @override
   Future<void> reportUser({
     required String reportedUid,
     required String reason,

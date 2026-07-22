@@ -3,8 +3,10 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../../models/profile_details.dart';
 import '../../services/auth_controller.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/location_autocomplete_field.dart';
 import '../../widgets/sign_out_dialog.dart';
 
 /// Shown after phone or email sign-in/sign-up until the user finishes the
@@ -32,6 +34,10 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   DateTime? _birthDate;
   String? _gender;
   String? _interestedIn;
+  String _city = '';
+  String? _state;
+  double? _lat;
+  double? _lng;
 
   bool _pickingPhotos = false;
   bool _submitting = false;
@@ -120,6 +126,9 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     if (_interestedIn == null) {
       return 'Choose who you\'re interested in to continue.';
     }
+    if (_city.isEmpty || _state == null || _lat == null || _lng == null) {
+      return 'Add your location to continue.';
+    }
     return null;
   }
 
@@ -134,6 +143,21 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     setState(() => _submitting = true);
 
     try {
+      // Already resolved to coordinates when the location suggestion was
+      // picked (see LocationAutocompleteField) — saved here, before
+      // touching photos, so a failure here doesn't waste an upload +
+      // moderation call.
+      try {
+        await widget.auth.updateLocation(lat: _lat!, lng: _lng!);
+        await widget.auth.saveProfileDetails(
+          ProfileDetails(city: _city, state: _state),
+        );
+      } catch (error) {
+        if (!mounted) return;
+        _showMessage('Could not set your location. Please try again.');
+        return;
+      }
+
       final photos = await Future.wait(
         _photos.map((file) => widget.auth.uploadProfilePhoto(file)),
       );
@@ -380,6 +404,53 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                       )
                       .toList(),
                 ),
+                const SizedBox(height: 20),
+                _sectionLabel(colors, 'Location'),
+                const SizedBox(height: 4),
+                Text(
+                  'This is what matches are measured from — required so we '
+                  'can show you (and only show you to) people nearby. It '
+                  'doesn\'t use your device\'s location.',
+                  style: TextStyle(
+                    color: colors.headerSecondaryText,
+                    fontSize: 12,
+                    height: 1.4,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 9),
+                LocationAutocompleteField(
+                  auth: widget.auth,
+                  initialCity: _city,
+                  initialState: _state,
+                  onSelected: (city, state, lat, lng) => setState(() {
+                    _city = city;
+                    _state = state;
+                    _lat = lat;
+                    _lng = lng;
+                  }),
+                ),
+                if (_city.isNotEmpty && _state != null) ...[
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.check_circle_rounded,
+                        size: 16,
+                        color: colors.accent,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Set to $_city, $_state',
+                        style: TextStyle(
+                          color: colors.headerSecondaryText,
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
                 const SizedBox(height: 26),
                 ElevatedButton(
                   onPressed: _submitting ? null : _submit,

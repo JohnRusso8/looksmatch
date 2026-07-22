@@ -1,5 +1,8 @@
-import 'package:app_settings/app_settings.dart';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../services/auth_controller.dart';
 import '../services/profile_cache.dart';
@@ -8,6 +11,25 @@ import '../widgets/delete_account_dialog.dart';
 import '../widgets/sign_out_dialog.dart';
 import 'legal_document_screen.dart';
 import 'premium_screen.dart';
+
+// In-house replacement for the app_settings plugin — dropped because its
+// iOS side ships only a Swift Package Manager manifest with a dependency
+// Flutter's own tooling has no code path to satisfy (confirmed by reading
+// the flutter_tools source directly), which broke every physical-device
+// build. iOS opens its own settings page via a URL scheme; Android has no
+// URL-scheme equivalent, so that side is a tiny native MethodChannel — see
+// MainActivity.kt.
+const MethodChannel _appSettingsChannel = MethodChannel(
+  'com.russo.looksmatch/app_settings',
+);
+
+Future<void> _openAppSettings() async {
+  if (Platform.isIOS) {
+    await launchUrl(Uri.parse('app-settings:'));
+  } else if (Platform.isAndroid) {
+    await _appSettingsChannel.invokeMethod('openAppSettings');
+  }
+}
 
 /// Notification categories a user can toggle, in display order. Keys match
 /// NOTIFICATION_CATEGORIES in functions/index.js exactly — sendPushToUser
@@ -233,7 +255,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               colors: colors,
               icon: Icons.language_rounded,
               label: 'Change Language',
-              onTap: () => AppSettings.openAppSettings(),
+              onTap: _openAppSettings,
             ),
             const SizedBox(height: 24),
             _groupLabel(colors, 'Legal'),

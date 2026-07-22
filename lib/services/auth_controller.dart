@@ -39,6 +39,47 @@ class ProfilePhoto {
   };
 }
 
+/// One suggestion from [AuthController.placeAutocomplete] — placeId is
+/// opaque, only meaningful as an input to [AuthController.placeDetails].
+class PlaceSuggestion {
+  const PlaceSuggestion({required this.placeId, required this.description});
+
+  factory PlaceSuggestion.fromMap(Map<dynamic, dynamic> map) {
+    return PlaceSuggestion(
+      placeId: (map['placeId'] ?? '').toString(),
+      description: (map['description'] ?? '').toString(),
+    );
+  }
+
+  final String placeId;
+  final String description;
+}
+
+/// The city/state/coordinates resolved from a [PlaceSuggestion] via
+/// [AuthController.placeDetails].
+class ResolvedPlace {
+  const ResolvedPlace({
+    required this.city,
+    required this.state,
+    required this.lat,
+    required this.lng,
+  });
+
+  factory ResolvedPlace.fromMap(Map<dynamic, dynamic> map) {
+    return ResolvedPlace(
+      city: (map['city'] ?? '').toString(),
+      state: (map['state'] ?? '').toString(),
+      lat: (map['lat'] as num).toDouble(),
+      lng: (map['lng'] as num).toDouble(),
+    );
+  }
+
+  final String city;
+  final String state;
+  final double lat;
+  final double lng;
+}
+
 class PhoneVerificationSession {
   const PhoneVerificationSession({
     required this.verificationId,
@@ -183,6 +224,15 @@ abstract class AuthController extends ChangeNotifier {
   /// matching and "N miles away" — raw coordinates never come back to any
   /// client, including this one; see functions/index.js enrichSummaries.
   Future<void> updateLocation({required double lat, required double lng});
+
+  /// City suggestions for [input] as the user types — proxied through
+  /// placeAutocomplete so the Google Places API key never ships in the app.
+  /// Returns an empty list for blank input rather than erroring.
+  Future<List<PlaceSuggestion>> placeAutocomplete(String input);
+
+  /// Resolves a [PlaceSuggestion.placeId] (from [placeAutocomplete]) to the
+  /// city/state/coordinates this app actually stores.
+  Future<ResolvedPlace> placeDetails(String placeId);
 
   /// Files a report against another user. Reports are deduplicated
   /// server-side by reporter, so repeat calls from this user overwrite
@@ -622,6 +672,25 @@ class FirebaseAuthController extends AuthController {
   }) async {
     final callable = _functions.httpsCallable('updateLocation');
     await callable.call<Map<String, dynamic>>({'lat': lat, 'lng': lng});
+  }
+
+  @override
+  Future<List<PlaceSuggestion>> placeAutocomplete(String input) async {
+    final callable = _functions.httpsCallable('placeAutocomplete');
+    final result = await callable.call<Map<String, dynamic>>({'input': input});
+    final rawPredictions = result.data['predictions'];
+    return rawPredictions is List
+        ? rawPredictions.whereType<Map>().map(PlaceSuggestion.fromMap).toList()
+        : const <PlaceSuggestion>[];
+  }
+
+  @override
+  Future<ResolvedPlace> placeDetails(String placeId) async {
+    final callable = _functions.httpsCallable('placeDetails');
+    final result = await callable.call<Map<String, dynamic>>({
+      'placeId': placeId,
+    });
+    return ResolvedPlace.fromMap(result.data);
   }
 
   @override

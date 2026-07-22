@@ -40,10 +40,9 @@ dependencies:
   firebase_storage: ^13.4.5
   image_picker: ^1.1.2
   cloud_functions: ^6.3.5
-  geocoding: ^5.0.0
   firebase_messaging: ^16.4.3
-  app_settings: ^8.0.2
   url_launcher: ^6.3.2
+  flutter_svg: ^2.2.1
 
 dev_dependencies:
   flutter_test:
@@ -62,19 +61,14 @@ dev_dependencies:
 # The following section is specific to Flutter packages.
 flutter:
 
-  # Project-level override, not a global `flutter config` change — this
-  # only affects this project, so it can't collide with other Flutter
-  # projects on this machine that need Swift Package Manager left off.
-  # Needed because app_settings ships only an SPM manifest, no podspec.
-  config:
-    enable-swift-package-manager: true
-
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
 
   # To add assets to your application, add an assets section, like this:
+  assets:
+    - assets/branding/
   # assets:
   #   - images/a_dot_burr.jpeg
   #   - images/a_dot_ham.jpeg

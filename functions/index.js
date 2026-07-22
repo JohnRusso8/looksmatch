@@ -18,6 +18,7 @@ initializeApp();
 const GEMINI_API_KEY = defineSecret('GEMINI_API_KEY');
 const AWS_ACCESS_KEY_ID = defineSecret('AWS_ACCESS_KEY_ID');
 const AWS_SECRET_ACCESS_KEY = defineSecret('AWS_SECRET_ACCESS_KEY');
+const GOOGLE_PLACES_API_KEY = defineSecret('GOOGLE_PLACES_API_KEY');
 
 const AWS_REGION = 'us-east-1';
 
@@ -1013,6 +1014,11 @@ exports.getDailyMatches = onCall({region: 'us-central1'}, async (request) => {
 
     const data = doc.data();
     if (data.scoringStatus !== 'scored') return false;
+    // Signup now requires setting a location, so this only ever excludes
+    // pre-existing accounts from before that requirement who haven't set
+    // one since — without it there's no distance to show and no way to
+    // apply the max-distance preference filter below.
+    if (data.hasLocation !== true) return false;
     // Paused is self-service (Settings screen) and distinct from
     // accountStatus (reviewer-only moderation) — a paused user keeps full
     // access to their existing matches/messages, they just stop being
@@ -1436,14 +1442,124 @@ exports.updateLocation = onCall({region: 'us-central1'}, async (request) => {
     throw new HttpsError('invalid-argument', 'Invalid coordinates.');
   }
 
-  await getFirestore().collection('locations').doc(uid).set({
+  const db = getFirestore();
+
+  await db.collection('locations').doc(uid).set({
     lat,
     lng,
     updatedAt: FieldValue.serverTimestamp(),
   });
 
+  // Mirrored onto users/{uid} (which is otherwise never touched by this
+  // function) so getDailyMatches's eligibility filter can check location
+  // presence without an extra per-candidate read of the admin-only
+  // locations collection.
+  await db
+    .collection('users')
+    .doc(uid)
+    .set({hasLocation: true}, {merge: true});
+
   return {status: 'ok'};
 });
+
+// Google Places Autocomplete — proxied through a Cloud Function so the API
+// key never ships in the app bundle, same reasoning as GEMINI_API_KEY.
+// Restricted to US cities to match kUsStates (the state dropdown this
+// feeds into is US-only) and to keep result volume/cost down.
+exports.placeAutocomplete = onCall(
+  {secrets: [GOOGLE_PLACES_API_KEY], region: 'us-central1'},
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Sign in required.');
+    }
+
+    const input = (request.data?.input || '').toString().trim();
+    if (!input) {
+      return {predictions: []};
+    }
+
+    const url = new URL('https://maps.googleapis.com/maps/api/place/autocomplete/json');
+    url.searchParams.set('input', input);
+    url.searchParams.set('types', '(cities)');
+    url.searchParams.set('components', 'country:us');
+    url.searchParams.set('key', GOOGLE_PLACES_API_KEY.value());
+
+    const response = await fetch(url);
+    const data = await response.json();
+
+    if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') {
+      console.log(
+        `placeAutocomplete error: status=${data.status} message=${data.error_message}`,
+      );
+      throw new HttpsError('internal', 'Could not fetch location suggestions.');
+    }
+
+    const predictions = (data.predictions || []).map((prediction) => ({
+      placeId: prediction.place_id,
+      description: prediction.description,
+    }));
+
+    return {predictions};
+  },
+);
+
+// Resolves a placeId (from placeAutocomplete) to just the city/state/
+// coordinates this app actually stores — never the full Places API
+// response, which includes far more than needed.
+exports.placeDetails = onCall(
+  {secrets: [GOOGLE_PLACES_API_KEY], region: 'us-central1'},
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Sign in required.');
+    }
+
+    const placeId = (request.data?.placeId || '').toString().trim();
+    if (!placeId) {
+      throw new HttpsError('invalid-argument', 'Missing placeId.');
+    }
+
+    const url = new URL('https://maps.googleapis.com/maps/api/place/details/json');
+    url.searchParams.set('place_id', placeId);
+    url.searchParams.set('fields', 'address_component,geometry');
+    url.searchParams.set('key', GOOGLE_PLACES_API_KEY.value());
+
+    const response = await fetch(url);
+    const data = await response.json();
+
+    if (data.status !== 'OK') {
+      console.log(
+        `placeDetails error: status=${data.status} message=${data.error_message}`,
+      );
+      throw new HttpsError('internal', 'Could not resolve that location.');
+    }
+
+    const components = data.result?.address_components || [];
+    const cityComponent =
+      components.find((c) => c.types.includes('locality')) ||
+      components.find((c) => c.types.includes('postal_town')) ||
+      components.find((c) => c.types.includes('sublocality'));
+    const stateComponent = components.find((c) =>
+      c.types.includes('administrative_area_level_1'),
+    );
+    const location = data.result?.geometry?.location;
+
+    if (!cityComponent || !stateComponent || !location) {
+      throw new HttpsError(
+        'not-found',
+        'Could not determine city/state for that location.',
+      );
+    }
+
+    return {
+      city: cityComponent.long_name,
+      state: stateComponent.short_name,
+      lat: location.lat,
+      lng: location.lng,
+    };
+  },
+);
 
 // Keyed by the token itself, so re-registering the same device on every
 // app launch is just a harmless overwrite rather than an ever-growing list.

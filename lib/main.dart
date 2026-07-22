@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import 'firebase_options.dart';
 import 'screens/auth_gate.dart';
+import 'screens/splash_screen.dart';
 import 'services/auth_controller.dart';
 import 'services/push_notification_service.dart';
 import 'theme/app_theme.dart';
@@ -37,8 +38,12 @@ class LooksMatchApp extends StatefulWidget {
 
 class _LooksMatchAppState extends State<LooksMatchApp> {
   final AuthController _auth = FirebaseAuthController();
-  late final PushNotificationService _pushService =
-      PushNotificationService(_auth, scaffoldMessengerKey);
+  late final PushNotificationService _pushService = PushNotificationService(
+    _auth,
+    scaffoldMessengerKey,
+  );
+
+  bool _showSplash = true;
 
   @override
   void initState() {
@@ -62,7 +67,15 @@ class _LooksMatchAppState extends State<LooksMatchApp> {
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
       themeMode: ThemeMode.system,
-      home: AuthGate(auth: _auth),
+      home: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 400),
+        child: _showSplash
+            ? SplashScreen(
+                key: const ValueKey('splash'),
+                onFinished: () => setState(() => _showSplash = false),
+              )
+            : AuthGate(key: const ValueKey('auth-gate'), auth: _auth),
+      ),
     );
   }
 }
